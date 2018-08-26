@@ -1,0 +1,33 @@
+Source: thmap
+Priority: extra
+Maintainer: https://github.com/rmind
+Build-Depends:
+ debhelper (>= 9),
+ make,
+ libtool
+Standards-Version: 3.9.1
+Homepage: https://github.com/rmind/thmap
+License: BSD-2-clause
+
+Package: libthmap1
+Section: lib
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Robin Hood hash map library
+ Concurrent trie-hash map library -- a general purpose hash map, combining
+ the elements of hashing and radix trie.  The implementation is written in
+ C11 and distributed under the 2-clause BSD license.
+
+Package: libthmap1-dbg
+Section: debug
+Architecture: any
+Depends: ${misc:Depends}, libthmap1 (= ${binary:Version})
+Description: Debug symbols for libthmap1
+ Debug symbols for libthmap1.
+
+Package: libthmap-dev
+Section: libdevel
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libthmap1 (= ${binary:Version})
+Description: Development files for libthmap1
+ Development files for libthmap1.
