@@ -7,7 +7,7 @@ the elements of hashing and radix trie.  Highlights:
 - Very competitive performance, with logarithmic time complexity on average.
 - Lookups are lock-free and inserts/deletes are using fine-grained locking.
 - Incremental growth of the data structure (no large resizing/rehashing).
-- Optional support for use in a shared memory, e.g. memory-mapped file.
+- Optional support for use with shared memory, e.g. memory-mapped file.
 
 The implementation is written in C11 and distributed under the 2-clause
 BSD license.
@@ -23,7 +23,7 @@ References:
 
 - [P. L. Lehman and S. B. Yao.
 Efficient locking for concurrent operations on B-trees
-ACM TODS, 6(4):650–670, 1981.
+ACM TODS, 6(4):650–670, 1981
 ](https://www.csd.uoc.gr/~hy460/pdf/p650-lehman.pdf)
 
 - [W. Litwin, 1981, Trie Hashing. Proceedings of the 1981 ACM SIGMOD, p. 19-29
