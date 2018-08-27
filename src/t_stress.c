@@ -48,7 +48,8 @@ prepare_collisions(void)
 	b = murmurhash3(&collision_keys[0], sizeof(uint64_t), 0) & ROOT_MASK;
 	while (b != c) {
 		collision_keys[1]++;
-		c = murmurhash3(&collision_keys[1], sizeof(uint64_t), 0) & ROOT_MASK;
+		c = murmurhash3(&collision_keys[1], sizeof(uint64_t), 0);
+		c &= ROOT_MASK;
 	}
 	assert(collision_keys[0] != collision_keys[1]);
 }
@@ -78,20 +79,22 @@ fuzz_collision(void *arg)
 	pthread_barrier_wait(&barrier);
 	while (n--) {
 		uint64_t key = collision_keys[fast_random() & 0x1];
+		void *keyval = (void *)(uintptr_t)key;
 		void *val;
 
-		switch (fast_random() % 4) {
+		switch (fast_random() & 3) {
 		case 0:
-		case 1:
+		case 1: // ~50% lookups
 			val = thmap_get(map, &key, sizeof(key));
-			assert(!val || (uintptr_t)val == (uintptr_t)key);
+			assert(!val || val == keyval);
 			break;
 		case 2:
-			thmap_put(map, &key, sizeof(key),
-			    (void *)(uintptr_t)key);
+			val = thmap_put(map, &key, sizeof(key), keyval);
+			assert(val == keyval);
 			break;
 		case 3:
-			thmap_del(map, &key, sizeof(key));
+			val = thmap_del(map, &key, sizeof(key));
+			assert(!val || val == keyval);
 			break;
 		}
 	}
@@ -115,19 +118,22 @@ fuzz_multi(void *arg, uint64_t range_mask)
 	pthread_barrier_wait(&barrier);
 	while (n--) {
 		uint64_t key = fast_random() & range_mask;
+		void *keyval = (void *)(uintptr_t)key;
 		void *val;
 
-		switch (fast_random() % 3) {
+		switch (fast_random() & 3) {
 		case 0:
+		case 1: // ~50% lookups
 			val = thmap_get(map, &key, sizeof(key));
-			assert(!val || (uintptr_t)val == (uintptr_t)key);
-			break;
-		case 1:
-			thmap_put(map, &key, sizeof(key),
-			    (void *)(uintptr_t)key);
+			assert(!val || val == keyval);
 			break;
 		case 2:
-			thmap_del(map, &key, sizeof(key));
+			val = thmap_put(map, &key, sizeof(key), keyval);
+			assert(val == keyval);
+			break;
+		case 3:
+			val = thmap_del(map, &key, sizeof(key));
+			assert(!val || val == keyval);
 			break;
 		}
 	}
