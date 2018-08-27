@@ -84,9 +84,14 @@ see [the stress test](src/t_stress.c) for the details on the technique.
 
 ## Caveats
 
-The implementation uses pointer tagging, where two least significant bits
-are reserved for the internal use.  This requires the base offset and node
-allocations to provide at least 32-bit alignment.
+* The implementation uses pointer tagging and atomic operations.  This
+requires the base address and the allocations to provide at least word
+alignment.
+
+* While the `NULL` values may be inserted, `thmap_get` and `thmap_del`
+cannot indicate whether the key was not found or a key with a NULL value
+was found.  If the caller needs to indicate an "empty" value, it can use a
+special pointer value, such as `(void *)(uintptr_t)0x1`.
 
 ## Example
 
