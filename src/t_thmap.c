@@ -106,6 +106,7 @@ test_delete(void)
 			ret = thmap_get(hmap, &keys[j], sizeof(uint64_t));
 			assert(ret == NUM2PTR(j));
 		}
+		thmap_gc(hmap);
 	}
 	thmap_destroy(hmap);
 	free(keys);
@@ -179,6 +180,7 @@ test_random(void)
 			}
 			break;
 		}
+		thmap_gc(hmap);
 	}
 
 	for (unsigned i = 0; i < nitems; i++) {

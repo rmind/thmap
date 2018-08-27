@@ -671,6 +671,8 @@ void
 thmap_destroy(thmap_t *thmap)
 {
 	uintptr_t root = THMAP_GETOFF(thmap, thmap->root);
+
 	thmap->ops->free(root, THMAP_ROOT_LEN);
+	thmap_gc(thmap);
 	free(thmap);
 }
