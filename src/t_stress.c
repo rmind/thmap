@@ -73,7 +73,7 @@ static void *
 fuzz_collision(void *arg)
 {
 	const unsigned id = (uintptr_t)arg;
-	unsigned n = 1 * 100 * 1000;
+	unsigned n = 1 * 1000 * 1000;
 
 	pthread_barrier_wait(&barrier);
 	while (n--) {
@@ -110,7 +110,7 @@ static void *
 fuzz_multi(void *arg, uint64_t range_mask)
 {
 	const unsigned id = (uintptr_t)arg;
-	unsigned n = 1 * 100 * 1000;
+	unsigned n = 1 * 1000 * 1000;
 
 	pthread_barrier_wait(&barrier);
 	while (n--) {

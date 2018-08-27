@@ -8,6 +8,7 @@ the elements of hashing and radix trie.  Highlights:
 - Lookups are lock-free and inserts/deletes are using fine-grained locking.
 - Incremental growth of the data structure (no large resizing/rehashing).
 - Optional support for use in a shared memory, e.g. memory-mapped file.
+
 The implementation is written in C11 and distributed under the 2-clause
 BSD license.
 
@@ -61,14 +62,14 @@ ACM TODS, 6(4):650–670, 1981.
   value; otherwise return `NULL`.
 
 The `thmap_ops_t` structure has the following members:
-* `void *(*alloc)(size_t len)`
+* `uintptr_t (*alloc)(size_t len)`
   * Function to allocate the memory.  Must return an address to the
   memory area of the size `len`.  The address must be relative to the
   base address specified during map creation and must be word-aligned.
-* `void (*free)(void *ptr, size_t len)`
+* `void (*free)(uintptr_t addr, size_t len)`
   * Function to release the memory.  Must take a previously allocated
-  address (relative to the base) and release the memory area.  The size
-  `len` is guaranteed to match the original allocation length.
+  address (relative to the base) and release the memory area.  The `len`
+  is guaranteed to match the original allocation length.
 
 ## Notes
 
