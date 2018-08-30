@@ -18,13 +18,13 @@ Reclamation (EBR) library provided [HERE](https://github.com/rmind/libqsbr).
 
 References:
 
+- [W. Litwin. Trie Hashing. Proceedings of the 1981 ACM SIGMOD, p. 19-29
+](https://dl.acm.org/citation.cfm?id=582322)
+
 - [P. L. Lehman and S. B. Yao.
-Efficient locking for concurrent operations on B-trees
+Efficient locking for concurrent operations on B-trees.
 ACM TODS, 6(4):650-670, 1981
 ](https://www.csd.uoc.gr/~hy460/pdf/p650-lehman.pdf)
-
-- [W. Litwin, 1981, Trie Hashing. Proceedings of the 1981 ACM SIGMOD, p. 19-29
-](https://dl.acm.org/citation.cfm?id=582322)
 
 ## API
 
