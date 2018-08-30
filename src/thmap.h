@@ -27,7 +27,8 @@ void *		thmap_get(thmap_t *, const void *, size_t);
 void *		thmap_put(thmap_t *, const void *, size_t, void *);
 void *		thmap_del(thmap_t *, const void *, size_t);
 
-void		thmap_gc(thmap_t *);
+void *		thmap_stage_gc(thmap_t *);
+void		thmap_gc(thmap_t *, void *);
 
 __END_DECLS
 

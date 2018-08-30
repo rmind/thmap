@@ -12,18 +12,15 @@ the elements of hashing and radix trie.  Highlights:
 The implementation is written in C11 and distributed under the 2-clause
 BSD license.
 
-NOTE: Delete operations (the key/data destruction) must be synchronised
-with the readers using garbage collection.  You can use the Epoch-based
+NOTE: Delete operations (the key/data destruction) must be synchronised with
+the readers using some reclamation mechanism.  You can use the Epoch-based
 Reclamation (EBR) library provided [HERE](https://github.com/rmind/libqsbr).
 
 References:
 
-- [P. Bagwell, 2001, Ideal Hash Trees, EPFL Technical Report
-](http://lampwww.epfl.ch/papers/idealhashtrees.pdf)
-
 - [P. L. Lehman and S. B. Yao.
 Efficient locking for concurrent operations on B-trees
-ACM TODS, 6(4):650–670, 1981
+ACM TODS, 6(4):650-670, 1981
 ](https://www.csd.uoc.gr/~hy460/pdf/p650-lehman.pdf)
 
 - [W. Litwin, 1981, Trie Hashing. Proceedings of the 1981 ACM SIGMOD, p. 19-29
@@ -59,7 +56,24 @@ ACM TODS, 6(4):650–670, 1981
 
 * `void *thmap_del(thmap_t *hmap, const void *key, size_t len)`
   * Remove the given key.  If the key was present, return the associated
-  value; otherwise return `NULL`.
+  value; otherwise return `NULL`.  The memory associated with the entry is
+  not released immediately, because in the concurrent environment (e.g.
+  multi-threaded application) the caller may need to ensure it is safe to
+  do so.  It is managed using the `thmap_stage_gc` and `thmap_gc` routines.
+
+* `void *thmap_stage_gc(thmap_t *hmap)`
+  * Stage the currently pending entries (the memory not yet released after
+  the deletion) for reclamation (G/C).  This operation should be called
+  **before** the synchronisation barrier.
+  * Returns a reference which must be passed to `thmap_gc`.  Not calling the
+  G/C function for the returned reference would result in a memory leak.
+
+* `void thmap_gc(thmap_t *hmap, void *ref)`
+  * Reclaim (G/C) the staged entries i.e. release any memory associated
+  with the deleted keys.  The reference must be the value returned by the
+  call to `thmap_stage_gc`.
+  * This function must be called **after** the synchronisation barrier which
+  guarantees that there are no active readers referencing the staged entries.
 
 The `thmap_ops_t` structure has the following members:
 * `uintptr_t (*alloc)(size_t len)`
