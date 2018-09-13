@@ -70,22 +70,25 @@
 #include "utils.h"
 
 /*
- * The root level fanout is 64 (indexed using the first 6 bits),
- * while each subsequent level has a fanout of 16 (using 4 bits).
+ * The root level fanout is 64 (indexed by the first 6 bits of the
+ * hash value).  Each subsequent level, represented by intermediate
+ * nodes, has a fanout of 16 (using 4 bits).
+ *
  * The hash function produces 32-bit values.
  */
-
-#define	ROOT_BITS	(6)
-#define	ROOT_SIZE	(1 << ROOT_BITS)
-#define	ROOT_MASK	(ROOT_SIZE - 1)
-
-#define	LEVEL_BITS	(4)
-#define	LEVEL_SIZE	(1 << LEVEL_BITS)
-#define	LEVEL_MASK	(LEVEL_SIZE - 1)
 
 #define	HASHVAL_BITS	(32)
 #define	HASHVAL_SHIFT	(5)
 #define	HASHVAL_MASK	(HASHVAL_BITS - 1)
+
+#define	ROOT_BITS	(6)
+#define	ROOT_SIZE	(1 << ROOT_BITS)
+#define	ROOT_MASK	(ROOT_SIZE - 1)
+#define	ROOT_SHIFT	(HASHVAL_BITS - ROOT_BITS)
+
+#define	LEVEL_BITS	(4)
+#define	LEVEL_SIZE	(1 << LEVEL_BITS)
+#define	LEVEL_MASK	(LEVEL_SIZE - 1)
 
 /*
  * Instead of raw pointers, we use offsets from the base address.
@@ -125,11 +128,10 @@ typedef uintptr_t thmap_ptr_t;
 typedef struct {
 	uint32_t	state;
 	thmap_ptr_t	parent;
-	thmap_ptr_t	slots[];
+	thmap_ptr_t	slots[LEVEL_SIZE];
 } thmap_inode_t;
 
-#define	THMAP_ROOT_LEN		offsetof(thmap_inode_t, slots[ROOT_SIZE])
-#define	THMAP_INODE_LEN		offsetof(thmap_inode_t, slots[LEVEL_SIZE])
+#define	THMAP_INODE_LEN		sizeof(thmap_inode_t)
 
 typedef struct {
 	thmap_ptr_t	key;
@@ -140,6 +142,7 @@ typedef struct {
 #define	THMAP_QUERY_INIT(l)	{ .level = (l), .hashidx = -1, .hashval = 0 }
 
 typedef struct {
+	unsigned	rslot;		// root-level slot index
 	unsigned	level;		// current level in the tree
 	int		hashidx;	// current hash index (block of bits)
 	uint64_t	hashval;	// current hash value
@@ -151,11 +154,12 @@ typedef struct {
 	void *		next;
 } thmap_gc_t;
 
+#define	THMAP_ROOT_LEN		(sizeof(thmap_ptr_t) * ROOT_SIZE)
+
 struct thmap {
 	uintptr_t	baseptr;
-	thmap_inode_t *	root;
+	thmap_ptr_t *	root;
 	unsigned	flags;
-
 	const thmap_ops_t *ops;
 	thmap_gc_t *	gc_list;
 };
@@ -238,7 +242,7 @@ static unsigned
 hashval_getslot(thmap_query_t *query, const void * restrict key, size_t len)
 {
 	const unsigned level = query->level;
-	unsigned nbits = ROOT_BITS + (level * LEVEL_BITS);
+	unsigned nbits = level * LEVEL_BITS;
 	const int i = nbits >> HASHVAL_SHIFT;
 
 	/* Count the bit offset. */
@@ -247,11 +251,7 @@ hashval_getslot(thmap_query_t *query, const void * restrict key, size_t len)
 		query->hashval = murmurhash3(key, len, i);
 		query->hashidx = i;
 	}
-	if (level == 0) {
-		/* Root level has a different fanout. */
-		return query->hashval & ROOT_MASK;
-	}
-	nbits = roundup2(nbits, LEVEL_BITS) & HASHVAL_MASK;
+	nbits &= HASHVAL_MASK;
 	return (query->hashval >> nbits) & LEVEL_MASK;
 }
 
@@ -279,33 +279,32 @@ key_cmp_p(const thmap_t *thmap, const thmap_leaf_t *leaf,
 static thmap_inode_t *
 node_create(thmap_t *thmap, thmap_inode_t *parent)
 {
-	size_t len = offsetof(thmap_inode_t, slots[LEVEL_SIZE]);
 	thmap_inode_t *node;
 	uintptr_t p;
 
-	ASSERT(parent);
-
-	p = thmap->ops->alloc(len);
+	p = thmap->ops->alloc(THMAP_INODE_LEN);
 	if (!p) {
 		return NULL;
 	}
 	node = THMAP_GETPTR(thmap, p);
 	ASSERT(THMAP_ALIGNED_P(node));
 
-	memset(node, 0, len);
-	node->state = NODE_LOCKED;
-	node->parent = THMAP_GETOFF(thmap, parent);
+	memset(node, 0, THMAP_INODE_LEN);
+	if (parent) {
+		node->state = NODE_LOCKED;
+		node->parent = THMAP_GETOFF(thmap, parent);
+	}
 	return node;
 }
 
 static void
 node_insert(thmap_inode_t *node, unsigned slot, thmap_ptr_t child)
 {
-	ASSERT(node_locked_p(node));
+	ASSERT(node_locked_p(node) || node->parent == 0);
 	ASSERT((node->state & NODE_DELETED) == 0);
 	ASSERT(node->slots[slot] == 0);
 
-	ASSERT(NODE_COUNT(node->state) < ROOT_SIZE);
+	ASSERT(NODE_COUNT(node->state) < LEVEL_SIZE);
 
 	node->slots[slot] = child;
 	node->state++;
@@ -319,7 +318,7 @@ node_remove(thmap_inode_t *node, unsigned slot)
 	ASSERT(node->slots[slot] != 0);
 
 	ASSERT(NODE_COUNT(node->state) > 0);
-	ASSERT(NODE_COUNT(node->state) <= ROOT_SIZE);
+	ASSERT(NODE_COUNT(node->state) <= LEVEL_SIZE);
 
 	node->slots[slot] = 0;
 	node->state--;
@@ -387,6 +386,56 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
 }
 
 /*
+ * ROOT OPERATIONS.
+ */
+
+static inline void
+root_query_init(thmap_query_t *query, const void * restrict key, size_t len)
+{
+	const uint32_t hashval = murmurhash3(key, len, 0);
+
+	query->rslot = (hashval >> ROOT_SHIFT) ^ len;
+	query->level = 0;
+	query->hashval = hashval;
+	query->hashidx = 0;
+}
+
+static inline bool
+root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
+{
+	const unsigned i = query->rslot;
+	thmap_inode_t *node;
+	thmap_ptr_t nodeoff;
+	unsigned slot;
+
+	/*
+	 * Must pre-check first.
+	 */
+	if (thmap->root[i]) {
+		return false;
+	}
+
+	/*
+	 * Create an intermediate node.  Since there is no parent set,
+	 * it will be created unlocked and the CAS operation will issue
+	 * the store memory fence for us.
+	 */
+	node = node_create(thmap, NULL);
+	slot = hashval_getleafslot(thmap, leaf, 0);
+	node_insert(node, slot, THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT);
+	nodeoff = THMAP_GETOFF(thmap, node);
+again:
+	if (thmap->root[i]) {
+		thmap->ops->free(nodeoff, THMAP_INODE_LEN);
+		return false;
+	}
+	if (!atomic_compare_exchange_weak(&thmap->root[i], NULL, nodeoff)) {
+		goto again;
+	}
+	return true;
+}
+
+/*
  * find_edge_node: given the hash, traverse the tree to find the edge node.
  *
  * => Returns an aligned (clean) pointer to the parent node.
@@ -396,30 +445,41 @@ static thmap_inode_t *
 find_edge_node(const thmap_t *thmap, thmap_query_t *query,
     const void * restrict key, size_t len, unsigned *slot)
 {
-	thmap_inode_t *parent = thmap->root;
+	thmap_ptr_t root_slot = thmap->root[query->rslot];
+	thmap_inode_t *parent;
 	thmap_ptr_t node;
 	unsigned off;
 
-	/* Root level has a different fanout. */
 	ASSERT(query->level == 0);
+	parent = THMAP_NODE(thmap, root_slot);
+	if (!parent) {
+		return NULL;
+	}
+descend:
 	off = hashval_getslot(query, key, len);
 	node = parent->slots[off];
 
-	/* Descend the tree until we find a leaf or empty slot. */
-	while (node && THMAP_INODE_P(node)) {
-		query->level++;
-		off = hashval_getslot(query, key, len);
-		parent = THMAP_NODE(thmap, node);
-
-		/* Ensure the parent load happens before the child load. */
-		atomic_thread_fence(memory_order_loads);
-		node = parent->slots[off];
-	}
+	/* Ensure the parent load happens before the child load. */
 	atomic_thread_fence(memory_order_loads);
+
+	/* Descend the tree until we find a leaf or empty slot. */
+	if (node && THMAP_INODE_P(node)) {
+		parent = THMAP_NODE(thmap, node);
+		query->level++;
+		goto descend;
+	}
 	*slot = off;
 	return parent;
 }
 
+/*
+ * find_edge_node_locked: traverse the tree, like find_edge_node(),
+ * but attempt to lock the edge node.
+ *
+ * => Returns NULL if the deleted node is found.  This indicates that
+ *    the caller must re-try from the root, as the root slot might have
+ *    changed too.
+ */
 static thmap_inode_t *
 find_edge_node_locked(const thmap_t *thmap, thmap_query_t *query,
     const void * restrict key, size_t len, unsigned *slot)
@@ -432,6 +492,10 @@ retry:
 	 * the tree might change by the time we acquire the lock.
 	 */
 	node = find_edge_node(thmap, query, key, len, slot);
+	if (!node) {
+		/* The root slot is empty -- let the caller decide. */
+		return NULL;
+	}
 	lock_node(node);
 	if (__predict_false(node->state & NODE_DELETED)) {
 		/*
@@ -440,13 +504,13 @@ retry:
 		 */
 		unlock_node(node);
 		query->level = 0;
-		goto retry;
+		return NULL;
 	}
 	target = node->slots[*slot];
 	if (__predict_false(target && THMAP_INODE_P(target))) {
 		/*
-		 * The target slot is has been changed and it is now
-		 * an intermediate lock.  Re-start from the root.
+		 * The target slot has been changed and it is now an
+		 * intermediate node.  Re-start from the top internode.
 		 */
 		unlock_node(node);
 		query->level = 0;
@@ -461,12 +525,16 @@ retry:
 void *
 thmap_get(thmap_t *thmap, const void *key, size_t len)
 {
-	thmap_query_t query = THMAP_QUERY_INIT(0);
+	thmap_query_t query;
 	thmap_inode_t *parent;
 	thmap_leaf_t *leaf;
 	unsigned slot;
 
+	root_query_init(&query, key, len);
 	parent = find_edge_node(thmap, &query, key, len, &slot);
+	if (!parent) {
+		return NULL;
+	}
 	leaf = get_leaf(thmap, parent, slot);
 	if (!leaf) {
 		return NULL;
@@ -486,7 +554,7 @@ thmap_get(thmap_t *thmap, const void *key, size_t len)
 void *
 thmap_put(thmap_t *thmap, const void *key, size_t len, void *val)
 {
-	thmap_query_t query = THMAP_QUERY_INIT(0);
+	thmap_query_t query;
 	thmap_leaf_t *leaf, *other;
 	thmap_inode_t *parent, *child;
 	unsigned slot, other_slot;
@@ -502,11 +570,23 @@ thmap_put(thmap_t *thmap, const void *key, size_t len, void *val)
 	if (__predict_false(!leaf)) {
 		return NULL;
 	}
+	root_query_init(&query, key, len);
+retry:
+	/*
+	 * Try to insert into the root first, if its slot is empty.
+	 */
+	if (root_try_put(thmap, &query, leaf)) {
+		/* Success: the leaf was inserted; no locking involved. */
+		return val;
+	}
 
 	/*
 	 * Find the edge node and the target slot.
 	 */
 	parent = find_edge_node_locked(thmap, &query, key, len, &slot);
+	if (!parent) {
+		goto retry;
+	}
 	target = parent->slots[slot]; // tagged offset
 	if (THMAP_INODE_P(target)) {
 		/*
@@ -589,13 +669,18 @@ out:
 void *
 thmap_del(thmap_t *thmap, const void *key, size_t len)
 {
-	thmap_query_t query = THMAP_QUERY_INIT(0);
+	thmap_query_t query;
 	thmap_leaf_t *leaf;
 	thmap_inode_t *parent;
 	unsigned slot;
 	void *val;
 
+	root_query_init(&query, key, len);
 	parent = find_edge_node_locked(thmap, &query, key, len, &slot);
+	if (!parent) {
+		/* Root slot empty: not found. */
+		return NULL;
+	}
 	leaf = get_leaf(thmap, parent, slot);
 	if (!leaf || !key_cmp_p(thmap, leaf, key, len)) {
 		/* Not found. */
@@ -623,6 +708,7 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		query.level--;
 		slot = hashval_getslot(&query, key, len);
 		parent = THMAP_NODE(thmap, node->parent);
+		ASSERT(parent != NULL);
 
 		lock_node(parent);
 		ASSERT((parent->state & NODE_DELETED) == 0);
@@ -635,6 +721,22 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 
 		/* Stage the removed node for G/C. */
 		stage_mem_gc(thmap, THMAP_GETOFF(thmap, node), THMAP_INODE_LEN);
+	}
+
+	/*
+	 * If the top node is empty, then we need to remove it from the
+	 * root level.  Mark the node as deleted and clear the slot.
+	 *
+	 * Note: acquiring the lock on the top node effectively prevents
+	 * the root slot from changing.
+	 */
+	if (NODE_COUNT(parent->state) == 0) {
+		ASSERT(query.level == 0);
+		ASSERT(parent->parent == 0);
+
+		parent->state |= NODE_DELETED;
+		atomic_thread_fence(memory_order_stores);
+		thmap->root[query.rslot] = 0;
 	}
 	unlock_node(parent);
 
@@ -710,7 +812,7 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 	thmap->ops = ops ? ops : &thmap_default_ops;
 	thmap->flags = flags;
 
-	/* Allocate the root node. */
+	/* Allocate the root level. */
 	root = thmap->ops->alloc(THMAP_ROOT_LEN);
 	if (!root) {
 		free(thmap);
