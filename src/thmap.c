@@ -485,6 +485,9 @@ descend:
 		query->level++;
 		goto descend;
 	}
+	if (parent->state & NODE_DELETED) {
+		return NULL;
+	}
 	*slot = off;
 	return parent;
 }
