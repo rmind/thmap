@@ -3,7 +3,7 @@
 Name:		libthmap
 Version:	%{version}
 Release:	1%{?dist}
-Summary:	Robin Hood hash map library
+Summary:	Concurrent trie-hash map library
 Group:		System Environment/Libraries
 License:	BSD
 URL:		https://github.com/rmind/thmap

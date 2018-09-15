@@ -13,7 +13,7 @@ Package: libthmap1
 Section: lib
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: Robin Hood hash map library
+Description: Concurrent trie-hash map library
  Concurrent trie-hash map library -- a general purpose hash map, combining
  the elements of hashing and radix trie.  The implementation is written in
  C11 and distributed under the 2-clause BSD license.
