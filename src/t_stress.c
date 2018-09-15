@@ -23,35 +23,79 @@ static thmap_t *		map;
 static pthread_barrier_t	barrier;
 static unsigned			nworkers;
 
-#define	COLKEY_MAGIC_VAL	0x8000100000080001
+static uint64_t			c_keys[4];
+static unsigned			thmap_alloc_count;
 
-static uint64_t			collision_keys[2];
+static uintptr_t
+alloc_test_wrapper(size_t len)
+{
+	thmap_alloc_count++; // count the allocation
+	return (uintptr_t)malloc(len);
+}
 
-/*
- * WARNING: This must match the definitions in the thmap.c implementation.
- */
-#define	ROOT_BITS	(6)
-#define	ROOT_SIZE	(1 << ROOT_BITS)
-#define	ROOT_MASK	(ROOT_SIZE - 1)
+static void
+free_test_wrapper(uintptr_t addr, size_t len)
+{
+	free((void *)addr); (void)len;
+}
 
 static void
 prepare_collisions(void)
 {
-	unsigned b, c = UINT_MAX;
-
-	collision_keys[0] = COLKEY_MAGIC_VAL;
-	collision_keys[1] = collision_keys[0];
+	static const thmap_ops_t thmap_test_ops = {
+		.alloc = alloc_test_wrapper,
+		.free = free_test_wrapper
+	};
+	void *val, *keyval = (void *)(uintptr_t)0xdeadbeef;
 
 	/*
-	 * Find two colliding keys (just brute-force as the range is small).
+	 * Pre-calculated collisions.  Note: the brute-force conditions
+	 * on the murmurhash3() values:
+	 *
+	 *	((h0 >> 26) ^ 8) != ((h1 >> 26) ^ 8) || (h0 & 3) == (h1 & 3)
+	 *	((h0 >> 26) ^ 8) != ((h1 >> 26) ^ 8) || (h0 & 3) != (h1 & 3)
+	 *	h0 != h3
 	 */
-	b = murmurhash3(&collision_keys[0], sizeof(uint64_t), 0) & ROOT_MASK;
-	while (b != c) {
-		collision_keys[1]++;
-		c = murmurhash3(&collision_keys[1], sizeof(uint64_t), 0);
-		c &= ROOT_MASK;
-	}
-	assert(collision_keys[0] != collision_keys[1]);
+	c_keys[0] = 0x8000100000080001;
+	c_keys[1] = 0x80001000000800fa;
+	c_keys[2] = 0x80001000000800df;
+	c_keys[3] = 0x800010012e04d085;
+
+	/*
+	 * Validate check root-level collision.
+	 */
+	map = thmap_create(0, &thmap_test_ops, THMAP_NOCOPY);
+	thmap_alloc_count = 0;
+
+	val = thmap_put(map, &c_keys[0], sizeof(uint64_t), keyval);
+	assert(val && thmap_alloc_count == 2); // leaf + internode
+
+	val = thmap_put(map, &c_keys[1], sizeof(uint64_t), keyval);
+	assert(val && thmap_alloc_count == 3); // just leaf
+
+	thmap_destroy(map);
+
+	/*
+	 * Validate check first-level (L0) collision.
+	 */
+	map = thmap_create(0, &thmap_test_ops, THMAP_NOCOPY);
+	(void)thmap_put(map, &c_keys[0], sizeof(uint64_t), keyval);
+
+	thmap_alloc_count = 0;
+	val = thmap_put(map, &c_keys[2], sizeof(uint64_t), keyval);
+	assert(val && thmap_alloc_count == 2); // leaf + internode
+	thmap_destroy(map);
+
+	/*
+	 * Validate the full 32-bit collision.
+	 */
+	map = thmap_create(0, &thmap_test_ops, THMAP_NOCOPY);
+	(void)thmap_put(map, &c_keys[0], sizeof(uint64_t), keyval);
+
+	thmap_alloc_count = 0;
+	val = thmap_put(map, &c_keys[3], sizeof(uint64_t), keyval);
+	assert(val && thmap_alloc_count == 1 + 8); // leaf + 8 levels
+	thmap_destroy(map);
 }
 
 /*
@@ -71,14 +115,14 @@ fast_random(void)
 }
 
 static void *
-fuzz_collision(void *arg)
+fuzz_collision(void *arg, unsigned range_mask)
 {
 	const unsigned id = (uintptr_t)arg;
 	unsigned n = 1 * 1000 * 1000;
 
 	pthread_barrier_wait(&barrier);
 	while (n--) {
-		uint64_t key = collision_keys[fast_random() & 0x1];
+		uint64_t key = c_keys[fast_random() & range_mask];
 		void *keyval = (void *)(uintptr_t)key;
 		void *val;
 
@@ -102,11 +146,34 @@ fuzz_collision(void *arg)
 
 	/* The primary thread performs the clean-up. */
 	if (id == 0) {
-		thmap_del(map, &collision_keys[0], sizeof(uint64_t));
-		thmap_del(map, &collision_keys[1], sizeof(uint64_t));
+		thmap_del(map, &c_keys[0], sizeof(uint64_t));
+		thmap_del(map, &c_keys[1], sizeof(uint64_t));
+		thmap_del(map, &c_keys[2], sizeof(uint64_t));
+		thmap_del(map, &c_keys[3], sizeof(uint64_t));
 	}
 	pthread_exit(NULL);
 	return NULL;
+}
+
+static void *
+fuzz_root_collision(void *arg)
+{
+	/* Root-level collision: c_keys[0] vs c_keys[1]. */
+	return fuzz_collision(arg, 0x1);
+}
+
+static void *
+fuzz_l0_collision(void *arg)
+{
+	/* First-level collision: c_keys[0] vs c_keys[2]. */
+	return fuzz_collision(arg, 0x2);
+}
+
+static void *
+fuzz_multi_collision(void *arg)
+{
+	/* Root-level collision: c_keys vs c_keys. */
+	return fuzz_collision(arg, 0x3);
 }
 
 static void *
@@ -170,6 +237,7 @@ run_test(void *func(void *))
 {
 	pthread_t *thr;
 
+	puts(".");
 	map = thmap_create(0, NULL, 0);
 	nworkers = sysconf(_SC_NPROCESSORS_CONF) + 1;
 
@@ -193,7 +261,9 @@ int
 main(void)
 {
 	prepare_collisions();
-	run_test(fuzz_collision);
+	run_test(fuzz_root_collision);
+	run_test(fuzz_l0_collision);
+	run_test(fuzz_multi_collision);
 	run_test(fuzz_multi_128);
 	run_test(fuzz_multi_512);
 	puts("ok");
