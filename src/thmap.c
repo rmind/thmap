@@ -138,7 +138,7 @@ typedef struct {
 	thmap_ptr_t	slots[LEVEL_SIZE];
 } thmap_inode_t;
 
-#define	THMAP_INODE_LEN		sizeof(thmap_inode_t)
+#define	THMAP_INODE_LEN	sizeof(thmap_inode_t)
 
 typedef struct {
 	thmap_ptr_t	key;
@@ -159,7 +159,7 @@ typedef struct {
 	void *		next;
 } thmap_gc_t;
 
-#define	THMAP_ROOT_LEN		(sizeof(thmap_ptr_t) * ROOT_SIZE)
+#define	THMAP_ROOT_LEN	(sizeof(thmap_ptr_t) * ROOT_SIZE)
 
 struct thmap {
 	uintptr_t	baseptr;
@@ -752,12 +752,19 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	 * the root slot from changing.
 	 */
 	if (NODE_COUNT(parent->state) == 0) {
+		const unsigned rslot = query.rslot;
+		const thmap_ptr_t nptr = thmap->root[rslot];
+
 		ASSERT(query.level == 0);
 		ASSERT(parent->parent == THMAP_NULL);
+		ASSERT(THMAP_GETOFF(thmap, parent) == nptr);
 
+		/* Mark as deleted and remove from the root-level slot. */
 		parent->state |= NODE_DELETED;
 		atomic_thread_fence(memory_order_stores);
-		thmap->root[query.rslot] = THMAP_NULL;
+		thmap->root[rslot] = THMAP_NULL;
+
+		stage_mem_gc(thmap, nptr, THMAP_INODE_LEN);
 	}
 	unlock_node(parent);
 
@@ -835,11 +842,11 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 
 	/* Allocate the root level. */
 	root = thmap->ops->alloc(THMAP_ROOT_LEN);
-	if (!root) {
+	thmap->root = THMAP_GETPTR(thmap, root);
+	if (!thmap->root) {
 		free(thmap);
 		return NULL;
 	}
-	thmap->root = THMAP_GETPTR(thmap, root);
 	memset(thmap->root, 0, THMAP_ROOT_LEN);
 	return thmap;
 }

@@ -11,9 +11,13 @@
 #include <inttypes.h>
 #include <assert.h>
 
+#include "utils.h"
 #include "thmap.h"
 
 #define	NUM2PTR(x)	((void *)(uintptr_t)(x))
+
+static unsigned		space_allocated = 0;
+static unsigned char	space[40000];
 
 static void
 test_basic(void)
@@ -196,6 +200,61 @@ test_random(void)
 	free(lens);
 }
 
+static uintptr_t
+alloc_test_wrapper(size_t len)
+{
+	uintptr_t p = space_allocated;
+	space_allocated += roundup2(len, sizeof(int));
+	assert(space_allocated <= sizeof(space));
+	return p;
+}
+
+static void
+free_test_wrapper(uintptr_t addr, size_t len)
+{
+	assert(addr < sizeof(space));
+	assert(len < sizeof(space));
+
+	space_allocated -= roundup2(len, sizeof(int));
+	assert(space_allocated < sizeof(space));
+}
+
+static const thmap_ops_t thmap_test_ops = {
+	.alloc = alloc_test_wrapper,
+	.free = free_test_wrapper
+};
+
+static void
+test_mem(void)
+{
+	uintptr_t baseptr = (uintptr_t)(void *)space;
+	const unsigned nitems = 512;
+	thmap_t *hmap;
+	void *ret;
+
+	hmap = thmap_create(baseptr, &thmap_test_ops, 0);
+	assert(hmap != NULL);
+
+	for (unsigned i = 0; i < nitems; i++) {
+		ret = thmap_put(hmap, &i, sizeof(int), NUM2PTR(i));
+		assert(ret == NUM2PTR(i));
+	}
+	for (unsigned i = 0; i < nitems; i++) {
+		ret = thmap_get(hmap, &i, sizeof(int));
+		assert(ret == NUM2PTR(i));
+	}
+	assert(space_allocated > 0);
+
+	for (unsigned i = 0; i < nitems; i++) {
+		ret = thmap_del(hmap, &i, sizeof(int));
+		assert(ret == NUM2PTR(i));
+	}
+	thmap_destroy(hmap);
+
+	/* All space must be freed. */
+	assert(space_allocated == 0);
+}
+
 int
 main(void)
 {
@@ -203,6 +262,7 @@ main(void)
 	test_large();
 	test_delete();
 	test_random();
+	test_mem();
 	puts("ok");
 	return 0;
 }
