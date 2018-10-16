@@ -2,8 +2,8 @@
 
 [![Build Status](https://travis-ci.org/rmind/thmap.svg?branch=master)](https://travis-ci.org/rmind/thmap)
 
-Concurrent trie-hash map library -- a general purpose hash map, combining
-the elements of hashing and radix trie.  Highlights:
+Concurrent trie-hash map library -- a general purpose associative array,
+combining the elements of hashing and radix trie.  Highlights:
 - Very competitive performance, with logarithmic time complexity on average.
 - Lookups are lock-free and inserts/deletes are using fine-grained locking.
 - Incremental growth of the data structure (no large resizing/rehashing).
