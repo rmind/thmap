@@ -116,6 +116,36 @@ test_delete(void)
 	free(keys);
 }
 
+static void
+test_longkey(void)
+{
+	thmap_t *hmap;
+	void *buf, *ret;
+
+	hmap = thmap_create(0, NULL, 0);
+	assert(hmap != NULL);
+
+	buf = malloc(32 * 1024);
+	assert(buf != NULL);
+	memset(buf, 0x11, 32 * 1024);
+
+	for (unsigned i = 1; i < 32; i++) {
+		ret = thmap_put(hmap, buf, i * 1024, NUM2PTR(i));
+		assert(ret == NUM2PTR(i));
+	}
+	for (unsigned i = 1; i < 32; i++) {
+		ret = thmap_get(hmap, buf, i * 1024);
+		assert(ret == NUM2PTR(i));
+	}
+	for (unsigned i = 1; i < 32; i++) {
+		ret = thmap_del(hmap, buf, i * 1024);
+		assert(ret == NUM2PTR(i));
+	}
+
+	thmap_destroy(hmap);
+	free(buf);
+}
+
 static void *
 generate_unique_key(unsigned idx, int *rlen)
 {
@@ -261,6 +291,7 @@ main(void)
 	test_basic();
 	test_large();
 	test_delete();
+	test_longkey();
 	test_random();
 	test_mem();
 	puts("ok");

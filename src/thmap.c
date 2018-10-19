@@ -84,12 +84,13 @@
  */
 
 #define	HASHVAL_BITS	(32)
+#define	HASHVAL_MOD	(HASHVAL_BITS - 1)
 #define	HASHVAL_SHIFT	(5)
-#define	HASHVAL_MASK	(HASHVAL_BITS - 1)
 
 #define	ROOT_BITS	(6)
 #define	ROOT_SIZE	(1 << ROOT_BITS)
-#define	ROOT_SHIFT	(HASHVAL_BITS - ROOT_BITS)
+#define	ROOT_MASK	(ROOT_SIZE - 1)
+#define	ROOT_MSBITS	(HASHVAL_BITS - ROOT_BITS)
 
 #define	LEVEL_BITS	(4)
 #define	LEVEL_SIZE	(1 << LEVEL_BITS)
@@ -244,7 +245,7 @@ hashval_init(thmap_query_t *query, const void * restrict key, size_t len)
 {
 	const uint32_t hashval = murmurhash3(key, len, 0);
 
-	query->rslot = (hashval >> ROOT_SHIFT) ^ len;
+	query->rslot = ((hashval >> ROOT_MSBITS) ^ len) & ROOT_MASK;
 	query->level = 0;
 	query->hashval = hashval;
 	query->hashidx = 0;
@@ -258,7 +259,7 @@ static unsigned
 hashval_getslot(thmap_query_t *query, const void * restrict key, size_t len)
 {
 	const unsigned offset = query->level * LEVEL_BITS;
-	const unsigned shift = offset & HASHVAL_MASK;
+	const unsigned shift = offset & HASHVAL_MOD;
 	const unsigned i = offset >> HASHVAL_SHIFT;
 
 	if (query->hashidx != i) {
@@ -275,7 +276,7 @@ hashval_getleafslot(const thmap_t *thmap,
 {
 	const void *key = THMAP_GETPTR(thmap, leaf->key);
 	const unsigned offset = level * LEVEL_BITS;
-	const unsigned shift = offset & HASHVAL_MASK;
+	const unsigned shift = offset & HASHVAL_MOD;
 	const unsigned i = offset >> HASHVAL_SHIFT;
 
 	return (murmurhash3(key, leaf->len, i) >> shift) & LEVEL_MASK;
