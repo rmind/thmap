@@ -197,11 +197,13 @@ static const thmap_ops_t thmap_default_ops = {
  * NODE LOCKING.
  */
 
+#ifdef DEBUG
 static inline bool
 node_locked_p(const thmap_inode_t *node)
 {
 	return (node->state & NODE_LOCKED) != 0;
 }
+#endif
 
 static void
 lock_node(thmap_inode_t *node)
