@@ -40,6 +40,9 @@ ACM TODS, 6(4):650-670, 1981
     pointers to them will be expected to be valid and the values constant
     until the key is deleted; by default, the put operation will make a
     copy of the key.
+    * `THMAP_SETROOT`: indicate that the root of the map will be manually
+    set using the `thmap_setroot` routine; by default, the map is initialised
+    and the root node is set on `thmap_create`.
 
 * `void thmap_destroy(thmap_t *hmap)`
   * Destroy the map, freeing the memory it uses.
@@ -74,6 +77,18 @@ ACM TODS, 6(4):650-670, 1981
   call to `thmap_stage_gc`.
   * This function must be called **after** the synchronisation barrier which
   guarantees that there are no active readers referencing the staged entries.
+
+If the map is created using the `THMAP_SETROOT` flag, then the following
+functions are applicable:
+
+* `void thmap_setroot(thmap_t *thmap, uintptr_t root_offset)`
+  * Set the root node.  The address must be relative to the base address,
+  as if allocated by the `thmap_ops_t::alloc` routine.  Return 0 on success
+  and -1 on failure (if already set).
+
+* `uintptr_t thmap_getroot(const thmap_t *thmap)`
+  * Get the root node address.  The returned address will be relative to
+  the base address.
 
 The `thmap_ops_t` structure has the following members:
 * `uintptr_t (*alloc)(size_t len)`

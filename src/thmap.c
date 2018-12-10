@@ -841,15 +841,33 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 	thmap->ops = ops ? ops : &thmap_default_ops;
 	thmap->flags = flags;
 
-	/* Allocate the root level. */
-	root = thmap->ops->alloc(THMAP_ROOT_LEN);
-	thmap->root = THMAP_GETPTR(thmap, root);
-	if (!thmap->root) {
-		free(thmap);
-		return NULL;
+	if ((thmap->flags & THMAP_SETROOT) == 0) {
+		/* Allocate the root level. */
+		root = thmap->ops->alloc(THMAP_ROOT_LEN);
+		thmap->root = THMAP_GETPTR(thmap, root);
+		if (!thmap->root) {
+			free(thmap);
+			return NULL;
+		}
+		memset(thmap->root, 0, THMAP_ROOT_LEN);
 	}
-	memset(thmap->root, 0, THMAP_ROOT_LEN);
 	return thmap;
+}
+
+int
+thmap_setroot(thmap_t *thmap, uintptr_t root_off)
+{
+	if (thmap->root) {
+		return -1;
+	}
+	thmap->root = THMAP_GETPTR(thmap, root_off);
+	return 0;
+}
+
+uintptr_t
+thmap_getroot(const thmap_t *thmap)
+{
+	return THMAP_GETOFF(thmap, thmap->root);
 }
 
 void
@@ -861,6 +879,8 @@ thmap_destroy(thmap_t *thmap)
 	ref = thmap_stage_gc(thmap);
 	thmap_gc(thmap, ref);
 
-	thmap->ops->free(root, THMAP_ROOT_LEN);
+	if ((thmap->flags & THMAP_SETROOT) == 0) {
+		thmap->ops->free(root, THMAP_ROOT_LEN);
+	}
 	free(thmap);
 }
