@@ -34,6 +34,9 @@ test_basic(void)
 	ret = thmap_put(hmap, "test", 4, NUM2PTR(0x55));
 	assert(ret == NUM2PTR(0x55));
 
+	ret = thmap_put(hmap, "test", 4, NUM2PTR(0x01));
+	assert(ret == NUM2PTR(0x55));
+
 	ret = thmap_get(hmap, "test", 4);
 	assert(ret == NUM2PTR(0x55));
 

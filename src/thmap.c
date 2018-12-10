@@ -391,16 +391,13 @@ leaf_create(const thmap_t *thmap, const void *key, size_t len, void *val)
 	return leaf;
 }
 
-static void *
+static void
 leaf_free(const thmap_t *thmap, thmap_leaf_t *leaf)
 {
-	void *val = leaf->val;
-
 	if ((thmap->flags & THMAP_NOCOPY) == 0) {
 		thmap->ops->free(leaf->key, leaf->len);
 	}
 	thmap->ops->free(THMAP_GETOFF(thmap, leaf), sizeof(thmap_leaf_t));
-	return val;
 }
 
 static thmap_leaf_t *
@@ -631,7 +628,8 @@ retry:
 		 * Duplicate.  Free the pre-allocated leaf and
 		 * return the present value.
 		 */
-		val = leaf_free(thmap, leaf);
+		leaf_free(thmap, leaf);
+		val = other->val;
 		goto out;
 	}
 descend:
