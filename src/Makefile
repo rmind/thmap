@@ -39,6 +39,7 @@ endif
 
 LIB=		lib$(PROJ)
 INCS=		thmap.h
+MANS=		thmap.3
 
 OBJS=		thmap.o
 OBJS+=		murmurhash.o
@@ -46,7 +47,7 @@ OBJS+=		murmurhash.o
 $(LIB).la:	LDFLAGS+=	-rpath $(LIBDIR) -version-info 1:0:0
 install/%.la:	ILIBDIR=	$(DESTDIR)/$(LIBDIR)
 install:	IINCDIR=	$(DESTDIR)/$(INCDIR)/
-#install:	IMANDIR=	$(DESTDIR)/$(MANDIR)/man3/
+install:	IMANDIR=	$(DESTDIR)/$(MANDIR)/man3/
 
 obj: $(OBJS)
 
@@ -65,7 +66,7 @@ install/%.la: %.la
 install: $(addprefix install/,$(LIB).la)
 	libtool --mode=finish $(LIBDIR)
 	mkdir -p $(IINCDIR) && install -c $(INCS) $(IINCDIR)
-	#mkdir -p $(IMANDIR) && install -c $(MANS) $(IMANDIR)
+	mkdir -p $(IMANDIR) && install -c $(MANS) $(IMANDIR)
 
 tests: $(OBJS) t_$(PROJ).o
 	$(CC) $(CFLAGS) $^ -o t_$(PROJ)

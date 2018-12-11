@@ -38,6 +38,6 @@ make install \
 %files
 %{_libdir}/*
 %{_includedir}/*
-#%{_mandir}/*
+%{_mandir}/*
 
 %changelog
