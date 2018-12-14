@@ -1,7 +1,7 @@
 .\"
 .\" Copyright (c) 2018 Mindaugas Rasiukevicius <rmind at noxt eu>
 .\" All rights reserved.
-.\" 
+.\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
@@ -10,7 +10,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 
+.\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
 .\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 .\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -52,7 +52,7 @@
 .Fn thmap_getroot "const thmap_t *thmap"
 .\" -----
 .Sh DESCRIPTION
-Concurrent trie-hash map -- a general purpose associative array,
+Concurrent trie-hash map \(em a general purpose associative array,
 combining the elements of hashing and radix trie.
 Highlights:
 .Pp
@@ -67,7 +67,7 @@ Incremental growth of the data structure (no large resizing/rehashing).
 Optional support for use with shared memory, e.g. memory-mapped file.
 .El
 .Pp
-Delete operations (the key/data destruction) must be synchronised with
+Delete operations (the key/data destruction) must be synchronized with
 the readers using some reclamation mechanism.
 .\" -----
 .Sh FUNCTIONS
@@ -107,7 +107,7 @@ by default, the put operation will make a copy of the key.
 Indicate that the root of the map will be manually set using the
 .Fn thmap_setroot
 routine;
-by default, the map is initialised and the root node is set on
+by default, the map is initialized and the root node is set on
 .Fn thmap_create .
 .El
 .\" ---
@@ -118,7 +118,9 @@ Destroy the map, freeing the memory it uses.
 Lookup the key (of a given length) and return the value associated with it.
 Return
 .Dv NULL
-if the key is not found (see the caveats section).
+if the key is not found (see the
+.Sx CAVEATS
+section).
 .\" ---
 .It Fn thmap_put
 Insert the key with an arbitrary value.
@@ -135,7 +137,7 @@ If the key was present, return the associated value;
 otherwise return
 .Dv NULL .
 The memory associated with the entry is not released immediately, because
-in the concurrent environment (e.g.  multi-threaded application) the caller
+in the concurrent environment (e.g., multi-threaded application) the caller
 may need to ensure it is safe to do so.
 It is managed using the
 .Fn thmap_stage_gc
@@ -148,7 +150,7 @@ Stage the currently pending entries (the memory not yet released after
 the deletion) for reclamation (G/C).
 This operation should be called
 .Em before
-the synchronisation barrier.
+the synchronization barrier.
 .Pp
 Returns a reference which must be passed to
 .Fn thmap_gc .
@@ -163,7 +165,7 @@ The reference must be the value returned by the call to
 .Pp
 This function must be called
 .Em after
-the synchronisation barrier which guarantees that there are no active
+the synchronization barrier which guarantees that there are no active
 readers referencing the staged entries.
 .\" ---
 .El
@@ -178,7 +180,7 @@ Set the root node.
 The address must be relative to the base address, as if allocated by the
 .Fn thmap_ops_t::alloc
 routine.
-Return 0 on success and -1 on failure (if already set).
+Return 0 on success and \-1 on failure (if already set).
 .It Fn thmap_getroot
 Get the root node address.
 The returned address will be relative to the base address.
