@@ -11,7 +11,9 @@ install:
   - sudo apt-get install -y libtool libtool-bin
 
 script:
-  # Run the unit tests and a stress test.
+  # Run the unit tests.
   - (cd src && make clean && make tests && make stress)
-  # Run the unit tests with ASAN enabled.
-  - (cd src && make clean && DEBUG=1 make tests)
+  # Run the stress test (non-DEBUG for high concurrency).
+  - (cd src && make clean && make stress)
+  # Run the stress test (DEBUG with ASAN enabled).
+  - (cd src && make clean && DEBUG=1 make stress)

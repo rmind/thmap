@@ -27,10 +27,6 @@ ifeq ($(MAKECMDGOALS),tests)
 DEBUG=		1
 endif
 
-ifeq ($(MAKECMDGOALS),stress)
-DEBUG=		1
-endif
-
 ifeq ($(DEBUG),1)
 CFLAGS+=	-Og -DDEBUG -fno-omit-frame-pointer
 CFLAGS+=	-fsanitize=address

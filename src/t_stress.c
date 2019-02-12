@@ -11,13 +11,15 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
-#include <assert.h>
 #include <limits.h>
 #include <errno.h>
 #include <err.h>
 
 #include "thmap.h"
 #include "utils.h"
+
+#define	CHECK_TRUE(x)	\
+    if (!(x)) { printf("FAIL: %s line %d\n", __func__, __LINE__); abort(); }
 
 static thmap_t *		map;
 static pthread_barrier_t	barrier;
@@ -37,6 +39,15 @@ static void
 free_test_wrapper(uintptr_t addr, size_t len)
 {
 	free((void *)addr); (void)len;
+}
+
+static void
+del_collision_keys(thmap_t *m)
+{
+	thmap_del(m, &c_keys[0], sizeof(uint64_t));
+	thmap_del(m, &c_keys[1], sizeof(uint64_t));
+	thmap_del(m, &c_keys[2], sizeof(uint64_t));
+	thmap_del(m, &c_keys[3], sizeof(uint64_t));
 }
 
 static void
@@ -68,11 +79,12 @@ prepare_collisions(void)
 	thmap_alloc_count = 0;
 
 	val = thmap_put(map, &c_keys[0], sizeof(uint64_t), keyval);
-	assert(val && thmap_alloc_count == 2); // leaf + internode
+	CHECK_TRUE(val && thmap_alloc_count == 2); // leaf + internode
 
 	val = thmap_put(map, &c_keys[1], sizeof(uint64_t), keyval);
-	assert(val && thmap_alloc_count == 3); // just leaf
+	CHECK_TRUE(val && thmap_alloc_count == 3); // just leaf
 
+	del_collision_keys(map);
 	thmap_destroy(map);
 
 	/*
@@ -83,7 +95,9 @@ prepare_collisions(void)
 
 	thmap_alloc_count = 0;
 	val = thmap_put(map, &c_keys[2], sizeof(uint64_t), keyval);
-	assert(val && thmap_alloc_count == 2); // leaf + internode
+	CHECK_TRUE(val && thmap_alloc_count == 2); // leaf + internode
+
+	del_collision_keys(map);
 	thmap_destroy(map);
 
 	/*
@@ -94,7 +108,9 @@ prepare_collisions(void)
 
 	thmap_alloc_count = 0;
 	val = thmap_put(map, &c_keys[3], sizeof(uint64_t), keyval);
-	assert(val && thmap_alloc_count == 1 + 8); // leaf + 8 levels
+	CHECK_TRUE(val && thmap_alloc_count == 1 + 8); // leaf + 8 levels
+
+	del_collision_keys(map);
 	thmap_destroy(map);
 }
 
@@ -130,15 +146,15 @@ fuzz_collision(void *arg, unsigned range_mask)
 		case 0:
 		case 1: // ~50% lookups
 			val = thmap_get(map, &key, sizeof(key));
-			assert(!val || val == keyval);
+			CHECK_TRUE(!val || val == keyval);
 			break;
 		case 2:
 			val = thmap_put(map, &key, sizeof(key), keyval);
-			assert(val == keyval);
+			CHECK_TRUE(val == keyval);
 			break;
 		case 3:
 			val = thmap_del(map, &key, sizeof(key));
-			assert(!val || val == keyval);
+			CHECK_TRUE(!val || val == keyval);
 			break;
 		}
 	}
@@ -192,15 +208,15 @@ fuzz_multi(void *arg, uint64_t range_mask)
 		case 0:
 		case 1: // ~50% lookups
 			val = thmap_get(map, &key, sizeof(key));
-			assert(!val || val == keyval);
+			CHECK_TRUE(!val || val == keyval);
 			break;
 		case 2:
 			val = thmap_put(map, &key, sizeof(key), keyval);
-			assert(val == keyval);
+			CHECK_TRUE(val == keyval);
 			break;
 		case 3:
 			val = thmap_del(map, &key, sizeof(key));
-			assert(!val || val == keyval);
+			CHECK_TRUE(!val || val == keyval);
 			break;
 		}
 	}
@@ -255,6 +271,7 @@ run_test(void *func(void *))
 	}
 	pthread_barrier_destroy(&barrier);
 	thmap_destroy(map);
+	free(thr);
 }
 
 int
