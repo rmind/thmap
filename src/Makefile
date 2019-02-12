@@ -33,6 +33,8 @@ endif
 
 ifeq ($(DEBUG),1)
 CFLAGS+=	-Og -DDEBUG -fno-omit-frame-pointer
+CFLAGS+=	-fsanitize=address
+LDFLAGS+=	-fsanitize=address
 else
 CFLAGS+=	-DNDEBUG
 endif

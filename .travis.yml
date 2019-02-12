@@ -1,5 +1,5 @@
 sudo: required
-dist: trusty
+dist: xenial
 
 language: c
 
@@ -7,4 +7,8 @@ compiler:
   - gcc
   - clang
 
-script: cd src && make tests && make stress
+script:
+  # Run the unit tests and a stress test.
+  - cd src && make tests && make stress
+  # Run the unit tests with ASAN enabled.
+  - cd src && DEBUG=1 make tests
