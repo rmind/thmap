@@ -12,7 +12,7 @@ install:
 
 script:
   # Run the unit tests.
-  - (cd src && make clean && make tests && make stress)
+  - (cd src && make clean && make tests)
   # Run the stress test (non-DEBUG for high concurrency).
   - (cd src && make clean && make stress)
   # Run the stress test (DEBUG with ASAN enabled).
