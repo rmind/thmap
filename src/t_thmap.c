@@ -46,6 +46,9 @@ test_basic(void)
 	ret = thmap_get(hmap, "test", 4);
 	assert(ret == NULL);
 
+	ret = thmap_del(hmap, "test", 4);
+	assert(ret == NULL);
+
 	thmap_destroy(hmap);
 }
 
