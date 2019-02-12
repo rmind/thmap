@@ -9,6 +9,6 @@ compiler:
 
 script:
   # Run the unit tests and a stress test.
-  - cd src && make tests && make stress
+  - (cd src && make clean && make tests && make stress)
   # Run the unit tests with ASAN enabled.
-  - cd src && DEBUG=1 make tests
+  - (cd src && make clean && DEBUG=1 make tests)
