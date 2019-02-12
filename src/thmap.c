@@ -211,7 +211,7 @@ lock_node(thmap_inode_t *node)
 	unsigned bcount = SPINLOCK_BACKOFF_MIN;
 	uint32_t s;
 again:
-	s = node->state;
+	s = atomic_load_explicit(&node->state, memory_order_relaxed);
 	if (s & NODE_LOCKED) {
 		SPINLOCK_BACKOFF(bcount);
 		goto again;
@@ -220,9 +220,10 @@ again:
 	 * CAS will issue a full memory fence for us.
 	 *
 	 * WARNING: for optimisations purposes, callers rely on us
-	 * issuing load and store fence
+	 * issuing at least an acquire fence.
 	 */
-	if (!atomic_compare_exchange_weak(&node->state, s, s | NODE_LOCKED)) {
+	if (!atomic_compare_exchange_weak_explicit(&node->state,
+	    s, s | NODE_LOCKED, memory_order_acquire, memory_order_acquire)) {
 		bcount = SPINLOCK_BACKOFF_MIN;
 		goto again;
 	}
@@ -234,8 +235,8 @@ unlock_node(thmap_inode_t *node)
 	uint32_t s = node->state & ~NODE_LOCKED;
 
 	ASSERT(node_locked_p(node));
-	atomic_thread_fence(memory_order_stores);
-	node->state = s; // atomic store
+	atomic_thread_fence(memory_order_release);
+	atomic_store_explicit(&node->state, s, memory_order_relaxed);
 }
 
 /*
@@ -474,10 +475,10 @@ find_edge_node(const thmap_t *thmap, thmap_query_t *query,
 	}
 descend:
 	off = hashval_getslot(query, key, len);
-	node = parent->slots[off];
+	node = atomic_load_explicit(&parent->slots[off], memory_order_relaxed);
 
 	/* Ensure the parent load happens before the child load. */
-	atomic_thread_fence(memory_order_loads);
+	atomic_thread_fence(memory_order_acquire);
 
 	/* Descend the tree until we find a leaf or empty slot. */
 	if (node && THMAP_INODE_P(node)) {
@@ -660,8 +661,9 @@ descend:
 	 * Ensure that stores to the child (and leaf) reach the
 	 * global visibility before it gets inserted to the parent.
 	 */
-	atomic_thread_fence(memory_order_stores);
-	parent->slots[slot] = THMAP_GETOFF(thmap, child);
+	atomic_thread_fence(memory_order_release);
+	atomic_store_explicit(&parent->slots[slot],
+	    THMAP_GETOFF(thmap, child), memory_order_relaxed);
 
 	unlock_node(parent);
 	ASSERT(node_locked_p(child));
@@ -736,7 +738,7 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		ASSERT((parent->state & NODE_DELETED) == 0);
 
 		node->state |= NODE_DELETED;
-		unlock_node(node); // memory_order_stores
+		unlock_node(node); // memory_order_release
 
 		ASSERT(THMAP_NODE(thmap, parent->slots[slot]) == node);
 		node_remove(parent, slot);
@@ -762,8 +764,9 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 
 		/* Mark as deleted and remove from the root-level slot. */
 		parent->state |= NODE_DELETED;
-		atomic_thread_fence(memory_order_stores);
-		thmap->root[rslot] = THMAP_NULL;
+		atomic_thread_fence(memory_order_release);
+		atomic_store_explicit(&thmap->root[rslot],
+		    THMAP_NULL, memory_order_relaxed);
 
 		stage_mem_gc(thmap, nptr, THMAP_INODE_LEN);
 	}

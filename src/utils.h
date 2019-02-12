@@ -62,6 +62,10 @@
 #define	atomic_compare_exchange_weak(ptr, expected, desired) \
     __sync_bool_compare_and_swap(ptr, expected, desired)
 #endif
+#ifndef atomic_compare_exchange_weak_explicit
+#define	atomic_compare_exchange_weak_explicit(ptr, expected, desired, s, f) \
+    __sync_bool_compare_and_swap(ptr, expected, desired)
+#endif
 
 #ifndef atomic_exchange
 static inline void *
@@ -79,21 +83,17 @@ again:
 #endif
 
 #ifndef atomic_thread_fence
+#define	memory_order_relaxed	__ATOMIC_RELAXED
 #define	memory_order_acquire	__ATOMIC_ACQUIRE
 #define	memory_order_release	__ATOMIC_RELEASE
 #define	memory_order_seq_cst	__ATOMIC_SEQ_CST
 #define	atomic_thread_fence(m)	__atomic_thread_fence(m)
 #endif
-
-/*
- * C11 memory model does not support classic load/store barriers.
- * Emulate it using the full memory barrier.
- */
-#ifndef memory_order_loads
-#define	memory_order_loads	memory_order_seq_cst
+#ifndef atomic_store_explicit
+#define	atomic_store_explicit	__atomic_store_n
 #endif
-#ifndef memory_order_stores
-#define	memory_order_stores	memory_order_seq_cst
+#ifndef atomic_load_explicit
+#define	atomic_load_explicit	__atomic_load_n
 #endif
 
 /*
