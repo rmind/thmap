@@ -7,6 +7,9 @@ compiler:
   - gcc
   - clang
 
+install:
+  - sudo apt-get install -y libtool libtool-bin
+
 script:
   # Run the unit tests and a stress test.
   - (cd src && make clean && make tests && make stress)
