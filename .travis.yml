@@ -8,9 +8,12 @@ compiler:
   - clang
 
 install:
+  - sudo apt-get install -y build-essential fakeroot debhelper
   - sudo apt-get install -y libtool libtool-bin
 
 script:
+  # Build the package.
+  - (cd pkg && make deb && sudo dpkg -i ../libthmap*.deb)
   # Run the unit tests.
   - (cd src && make clean && make tests)
   # Run the stress test (non-DEBUG for high concurrency).
