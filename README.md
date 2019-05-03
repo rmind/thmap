@@ -16,7 +16,7 @@ NOTE: Delete operations (the key/data destruction) must be synchronised with
 the readers using some reclamation mechanism.  You can use the Epoch-based
 Reclamation (EBR) library provided [HERE](https://github.com/rmind/libqsbr).
 
-References:
+References (some, but not all, key ideas are based on these papers):
 
 - [W. Litwin. Trie Hashing. Proceedings of the 1981 ACM SIGMOD, p. 19-29
 ](https://dl.acm.org/citation.cfm?id=582322)
@@ -121,6 +121,20 @@ alignment.
 cannot indicate whether the key was not found or a key with a NULL value
 was found.  If the caller needs to indicate an "empty" value, it can use a
 special pointer value, such as `(void *)(uintptr_t)0x1`.
+
+## Performance
+
+The library has been benchmarked using different key profiles (8 to 256
+bytes), set sizes (hundreds, thousands, millions) and ratio between readers
+and writers (from 60:40 to 90:10).  In all cases it demonstrated nearly
+linear scalability (up to the number of cores).  Here is an example result
+when matched with the C++ libcuckoo library:
+
+![](misc/thmap_lookup_80_64bit_keys_intel_4980hq.svg)
+
+Disclaimer: benchmark results, however, depend on many aspects (workload,
+hardware characteristics, methodology, etc).  Ultimately, readers are
+encouraged to perform their own benchmarks.
 
 ## Example
 
