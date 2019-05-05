@@ -13,7 +13,7 @@ install:
 
 script:
   # Build the package.
-  - (cd pkg && make deb && sudo dpkg -i ../libthmap*.deb)
+  - (cd pkg && make deb)
   # Run the unit tests.
   - (cd src && make clean && make tests)
   # Run the stress test (non-DEBUG for high concurrency).
