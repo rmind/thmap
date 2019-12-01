@@ -406,7 +406,7 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
 {
 	thmap_ptr_t node;
 
-	node = parent->slots[slot];
+	node = atomic_load_explicit(&parent->slots[slot], memory_order_relaxed);
 	if (THMAP_INODE_P(node)) {
 		return NULL;
 	}
@@ -428,24 +428,25 @@ root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 	/*
 	 * Must pre-check first.
 	 */
-	if (thmap->root[i]) {
+	if (atomic_load_explicit(&thmap->root[i], memory_order_relaxed)) {
 		return false;
 	}
 
 	/*
 	 * Create an intermediate node.  Since there is no parent set,
 	 * it will be created unlocked and the CAS operation will issue
-	 * the store memory fence for us.
+	 * the release fence for us.
 	 */
 	node = node_create(thmap, NULL);
 	slot = hashval_getl0slot(thmap, query, leaf);
 	node_insert(node, slot, THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT);
 	nptr = THMAP_GETOFF(thmap, node);
 again:
-	if (thmap->root[i]) {
+	if (atomic_load_explicit(&thmap->root[i], memory_order_relaxed)) {
 		thmap->ops->free(nptr, THMAP_INODE_LEN);
 		return false;
 	}
+	/* CAS will issue: atomic_thread_fence(memory_order_release); */
 	if (!atomic_compare_exchange_weak(&thmap->root[i], THMAP_NULL, nptr)) {
 		goto again;
 	}
@@ -462,17 +463,20 @@ static thmap_inode_t *
 find_edge_node(const thmap_t *thmap, thmap_query_t *query,
     const void * restrict key, size_t len, unsigned *slot)
 {
-	thmap_ptr_t root_slot = thmap->root[query->rslot];
+	thmap_ptr_t root_slot;
 	thmap_inode_t *parent;
 	thmap_ptr_t node;
 	unsigned off;
 
 	ASSERT(query->level == 0);
 
+	root_slot = atomic_load_explicit(&thmap->root[query->rslot],
+	    memory_order_relaxed);
 	parent = THMAP_NODE(thmap, root_slot);
 	if (!parent) {
 		return NULL;
 	}
+	atomic_thread_fence(memory_order_acquire);
 descend:
 	off = hashval_getslot(query, key, len);
 	node = atomic_load_explicit(&parent->slots[off], memory_order_relaxed);
@@ -486,7 +490,8 @@ descend:
 		query->level++;
 		goto descend;
 	}
-	if (parent->state & NODE_DELETED) {
+	if (atomic_load_explicit(&parent->state,
+	    memory_order_relaxed) & NODE_DELETED) {
 		return NULL;
 	}
 	*slot = off;
@@ -528,7 +533,8 @@ retry:
 		query->level = 0;
 		return NULL;
 	}
-	target = node->slots[*slot];
+	target = atomic_load_explicit(&node->slots[*slot],
+	    memory_order_relaxed);
 	if (__predict_false(target && THMAP_INODE_P(target))) {
 		/*
 		 * The target slot has been changed and it is now an
@@ -584,9 +590,6 @@ thmap_put(thmap_t *thmap, const void *key, size_t len, void *val)
 
 	/*
 	 * First, pre-allocate and initialise the leaf node.
-	 *
-	 * NOTE: locking of the edge node below will issue the
-	 * store fence for us.
 	 */
 	leaf = leaf_create(thmap, key, len, val);
 	if (__predict_false(!leaf)) {
@@ -601,6 +604,7 @@ retry:
 		/* Success: the leaf was inserted; no locking involved. */
 		return val;
 	}
+	atomic_thread_fence(memory_order_release); // prepare leaf to be visible
 
 	/*
 	 * Find the edge node and the target slot.
@@ -609,7 +613,8 @@ retry:
 	if (!parent) {
 		goto retry;
 	}
-	target = parent->slots[slot]; // tagged offset
+	target = atomic_load_explicit(&parent->slots[slot],
+	    memory_order_relaxed); // tagged offset
 	if (THMAP_INODE_P(target)) {
 		/*
 		 * Empty slot: simply insert the new leaf.  The store
@@ -713,7 +718,8 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	}
 
 	/* Remove the leaf. */
-	ASSERT(THMAP_NODE(thmap, parent->slots[slot]) == leaf);
+	ASSERT(THMAP_NODE(thmap, atomic_load_explicit(&parent->slots[slot],
+	    memory_order_relaxed)) == leaf);
 	node_remove(parent, slot);
 
 	/*
@@ -740,7 +746,9 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		node->state |= NODE_DELETED;
 		unlock_node(node); // memory_order_release
 
-		ASSERT(THMAP_NODE(thmap, parent->slots[slot]) == node);
+		ASSERT(THMAP_NODE(thmap,
+		    atomic_load_explicit(&parent->slots[slot],
+		    memory_order_relaxed)) == node);
 		node_remove(parent, slot);
 
 		/* Stage the removed node for G/C. */
@@ -756,7 +764,8 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	 */
 	if (NODE_COUNT(parent->state) == 0) {
 		const unsigned rslot = query.rslot;
-		const thmap_ptr_t nptr = thmap->root[rslot];
+		const thmap_ptr_t nptr = atomic_load_explicit(
+		    &thmap->root[rslot], memory_order_relaxed);
 
 		ASSERT(query.level == 0);
 		ASSERT(parent->parent == THMAP_NULL);
@@ -796,7 +805,10 @@ stage_mem_gc(thmap_t *thmap, uintptr_t addr, size_t len)
 	gc->addr = addr;
 	gc->len = len;
 retry:
-	gc->next = head = thmap->gc_list;
+	head = atomic_load_explicit(&thmap->gc_list, memory_order_relaxed);
+	atomic_thread_fence(memory_order_acquire);
+	gc->next = head;
+
 	if (!atomic_compare_exchange_weak(&thmap->gc_list, head, gc)) {
 		goto retry;
 	}
@@ -853,6 +865,7 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 			return NULL;
 		}
 		memset(thmap->root, 0, THMAP_ROOT_LEN);
+		atomic_thread_fence(memory_order_release);
 	}
 	return thmap;
 }
@@ -864,6 +877,7 @@ thmap_setroot(thmap_t *thmap, uintptr_t root_off)
 		return -1;
 	}
 	thmap->root = THMAP_GETPTR(thmap, root_off);
+	atomic_thread_fence(memory_order_release);
 	return 0;
 }
 
