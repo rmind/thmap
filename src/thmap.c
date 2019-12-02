@@ -230,7 +230,7 @@ again:
 	 * unlock_node.
 	 */
 	if (!atomic_compare_exchange_weak_explicit(&node->state,
-	    s, s | NODE_LOCKED, memory_order_acquire, memory_order_relaxed)) {
+	    &s, s | NODE_LOCKED, memory_order_acquire, memory_order_relaxed)) {
 		bcount = SPINLOCK_BACKOFF_MIN;
 		goto again;
 	}
@@ -455,6 +455,7 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
 static inline bool
 root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 {
+	thmap_ptr_t expected;
 	const unsigned i = query->rslot;
 	thmap_inode_t *node;
 	thmap_ptr_t nptr;
@@ -488,7 +489,8 @@ again:
 	 * Release operation pairs with consume operation in
 	 * find_edge_node.
 	 */
-	if (!atomic_compare_exchange_weak_explicit(&thmap->root[i], THMAP_NULL,
+	expected = THMAP_NULL;
+	if (!atomic_compare_exchange_weak_explicit(&thmap->root[i], &expected,
 		nptr, memory_order_release, memory_order_relaxed)) {
 		goto again;
 	}
@@ -889,7 +891,7 @@ retry:
 	 * Release operation pairs with acquire operation in
 	 * thmap_stage_gc.
 	 */
-	if (!atomic_compare_exchange_weak_explicit(&thmap->gc_list, head, gc,
+	if (!atomic_compare_exchange_weak_explicit(&thmap->gc_list, &head, gc,
 		memory_order_release, memory_order_relaxed)) {
 		goto retry;
 	}
