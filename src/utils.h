@@ -80,11 +80,13 @@ again:
 	}
 	return oldval;
 }
+#define atomic_exchange_explicit(ptr, newval, o) atomic_exchange(ptr, newval)
 #endif
 
 #ifndef atomic_thread_fence
 #define	memory_order_relaxed	__ATOMIC_RELAXED
 #define	memory_order_acquire	__ATOMIC_ACQUIRE
+#define	memory_order_consume	__ATOMIC_CONSUME
 #define	memory_order_release	__ATOMIC_RELEASE
 #define	memory_order_seq_cst	__ATOMIC_SEQ_CST
 #define	atomic_thread_fence(m)	__atomic_thread_fence(m)

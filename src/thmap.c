@@ -75,6 +75,14 @@
 #include "thmap.h"
 #include "utils.h"
 
+#define	atomic_load_relaxed(p)	atomic_load_explicit(p, memory_order_relaxed)
+#define	atomic_load_acquire(p)	atomic_load_explicit(p, memory_order_acquire)
+#define	atomic_load_consume(p)	atomic_load_explicit(p, memory_order_consume)
+#define	atomic_store_release(p,v) \
+	atomic_store_explicit(p, v, memory_order_release)
+#define	atomic_store_relaxed(p,v) \
+	atomic_store_explicit(p, v, memory_order_relaxed)
+
 /*
  * The root level fanout is 64 (indexed by the last 6 bits of the hash
  * value XORed with the length).  Each subsequent level, represented by
@@ -134,9 +142,9 @@ typedef uintptr_t thmap_ptr_t;
  */
 
 typedef struct {
-	uint32_t	state;
-	thmap_ptr_t	parent;
-	thmap_ptr_t	slots[LEVEL_SIZE];
+	uint32_t _Atomic	state;
+	thmap_ptr_t		parent;
+	thmap_ptr_t _Atomic	slots[LEVEL_SIZE];
 } thmap_inode_t;
 
 #define	THMAP_INODE_LEN	sizeof(thmap_inode_t)
@@ -163,11 +171,11 @@ typedef struct {
 #define	THMAP_ROOT_LEN	(sizeof(thmap_ptr_t) * ROOT_SIZE)
 
 struct thmap {
-	uintptr_t	baseptr;
-	thmap_ptr_t *	root;
-	unsigned	flags;
-	const thmap_ops_t *ops;
-	thmap_gc_t *	gc_list;
+	uintptr_t		baseptr;
+	_Atomic thmap_ptr_t *	root;
+	unsigned		flags;
+	const thmap_ops_t *	ops;
+	thmap_gc_t *_Atomic	gc_list;
 };
 
 static void	stage_mem_gc(thmap_t *, uintptr_t, size_t);
@@ -201,7 +209,7 @@ static const thmap_ops_t thmap_default_ops = {
 static inline bool
 node_locked_p(const thmap_inode_t *node)
 {
-	return (node->state & NODE_LOCKED) != 0;
+	return (atomic_load_relaxed(&node->state) & NODE_LOCKED) != 0;
 }
 #endif
 
@@ -211,19 +219,18 @@ lock_node(thmap_inode_t *node)
 	unsigned bcount = SPINLOCK_BACKOFF_MIN;
 	uint32_t s;
 again:
-	s = atomic_load_explicit(&node->state, memory_order_relaxed);
+	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	s = atomic_load_relaxed(&node->state);
 	if (s & NODE_LOCKED) {
 		SPINLOCK_BACKOFF(bcount);
 		goto again;
 	}
 	/*
-	 * CAS will issue a full memory fence for us.
-	 *
-	 * WARNING: for optimisations purposes, callers rely on us
-	 * issuing at least an acquire fence.
+	 * Acquire operation pairs with release operation in
+	 * unlock_node.
 	 */
 	if (!atomic_compare_exchange_weak_explicit(&node->state,
-	    s, s | NODE_LOCKED, memory_order_acquire, memory_order_acquire)) {
+	    s, s | NODE_LOCKED, memory_order_acquire, memory_order_relaxed)) {
 		bcount = SPINLOCK_BACKOFF_MIN;
 		goto again;
 	}
@@ -232,11 +239,12 @@ again:
 static void
 unlock_node(thmap_inode_t *node)
 {
-	uint32_t s = node->state & ~NODE_LOCKED;
+	/* State is stable while locked, hence relaxed ordering.  */
+	uint32_t s = atomic_load_relaxed(&node->state) & ~NODE_LOCKED;
 
 	ASSERT(node_locked_p(node));
-	atomic_thread_fence(memory_order_release);
-	atomic_store_explicit(&node->state, s, memory_order_relaxed);
+	/* Release operation pairs with acquire operation in lock_node.  */
+	atomic_store_release(&node->state, s);
 }
 
 /*
@@ -322,7 +330,8 @@ node_create(thmap_t *thmap, thmap_inode_t *parent)
 
 	memset(node, 0, THMAP_INODE_LEN);
 	if (parent) {
-		node->state = NODE_LOCKED;
+		/* Not yet published, no need for ordering.  */
+		atomic_store_relaxed(&node->state, NODE_LOCKED);
 		node->parent = THMAP_GETOFF(thmap, parent);
 	}
 	return node;
@@ -331,28 +340,44 @@ node_create(thmap_t *thmap, thmap_inode_t *parent)
 static void
 node_insert(thmap_inode_t *node, unsigned slot, thmap_ptr_t child)
 {
+	/*
+	 * State and slots are stable while locked, hence relaxed
+	 * ordering for loads.
+	 */
 	ASSERT(node_locked_p(node) || node->parent == THMAP_NULL);
-	ASSERT((node->state & NODE_DELETED) == 0);
-	ASSERT(node->slots[slot] == THMAP_NULL);
+	ASSERT((atomic_load_relaxed(&node->state) & NODE_DELETED) == 0);
+	ASSERT(atomic_load_relaxed(&node->slots[slot]) == THMAP_NULL);
 
-	ASSERT(NODE_COUNT(node->state) < LEVEL_SIZE);
+	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) < LEVEL_SIZE);
 
-	node->slots[slot] = child;
-	node->state++;
+	/*
+	 * If node is public already, caller is responsible for issuing
+	 * release fence; if node is not public, no ordering is needed.
+	 * Hence relaxed ordering.
+	 */
+	atomic_store_relaxed(&node->slots[slot], child);
+	atomic_store_relaxed(&node->state,
+	    1 + atomic_load_relaxed(&node->state));
 }
 
 static void
 node_remove(thmap_inode_t *node, unsigned slot)
 {
+	/*
+	 * State and slots are stable while locked, hence relaxed
+	 * ordering for loads.
+	 */
 	ASSERT(node_locked_p(node));
-	ASSERT((node->state & NODE_DELETED) == 0);
-	ASSERT(node->slots[slot] != THMAP_NULL);
+	ASSERT((atomic_load_relaxed(&node->state) & NODE_DELETED) == 0);
+	ASSERT(atomic_load_relaxed(&node->slots[slot]) != THMAP_NULL);
 
-	ASSERT(NODE_COUNT(node->state) > 0);
-	ASSERT(NODE_COUNT(node->state) <= LEVEL_SIZE);
+	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) > 0);
+	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) <= LEVEL_SIZE);
 
-	node->slots[slot] = THMAP_NULL;
-	node->state--;
+	/* Element will be GC'd later; no need for ordering here.  */
+	atomic_store_relaxed(&node->slots[slot], THMAP_NULL);
+	atomic_store_relaxed(&node->state,
+	    atomic_load_relaxed(&node->state) - 1);
 }
 
 /*
@@ -406,7 +431,11 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
 {
 	thmap_ptr_t node;
 
-	node = atomic_load_explicit(&parent->slots[slot], memory_order_relaxed);
+	/*
+	 * Consume operation pairs with release fence or release
+	 * operation in thmap_put.
+	 */
+	node = atomic_load_consume(&parent->slots[slot]);
 	if (THMAP_INODE_P(node)) {
 		return NULL;
 	}
@@ -417,6 +446,12 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
  * ROOT OPERATIONS.
  */
 
+/*
+ * root_try_put: Try to set a root pointer at query->rslot.
+ *
+ * => Implies release operation on success.
+ * => Implies no ordering on failure.
+ */
 static inline bool
 root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 {
@@ -426,9 +461,11 @@ root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 	unsigned slot;
 
 	/*
-	 * Must pre-check first.
+	 * Must pre-check first.  No ordering required because we'll
+	 * check again before taking any actions, and start over if
+	 * this changes from null.
 	 */
-	if (atomic_load_explicit(&thmap->root[i], memory_order_relaxed)) {
+	if (atomic_load_relaxed(&thmap->root[i])) {
 		return false;
 	}
 
@@ -442,12 +479,17 @@ root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 	node_insert(node, slot, THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT);
 	nptr = THMAP_GETOFF(thmap, node);
 again:
-	if (atomic_load_explicit(&thmap->root[i], memory_order_relaxed)) {
+	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	if (atomic_load_relaxed(&thmap->root[i])) {
 		thmap->ops->free(nptr, THMAP_INODE_LEN);
 		return false;
 	}
-	/* CAS will issue: atomic_thread_fence(memory_order_release); */
-	if (!atomic_compare_exchange_weak(&thmap->root[i], THMAP_NULL, nptr)) {
+	/*
+	 * Release operation pairs with consume operation in
+	 * find_edge_node.
+	 */
+	if (!atomic_compare_exchange_weak_explicit(&thmap->root[i], THMAP_NULL,
+		nptr, memory_order_release, memory_order_relaxed)) {
 		goto again;
 	}
 	return true;
@@ -470,19 +512,19 @@ find_edge_node(const thmap_t *thmap, thmap_query_t *query,
 
 	ASSERT(query->level == 0);
 
-	root_slot = atomic_load_explicit(&thmap->root[query->rslot],
-	    memory_order_relaxed);
+	/* Consume operation pairs with release operation in root_try_put.  */
+	root_slot = atomic_load_consume(&thmap->root[query->rslot]);
 	parent = THMAP_NODE(thmap, root_slot);
 	if (!parent) {
 		return NULL;
 	}
-	atomic_thread_fence(memory_order_acquire);
 descend:
 	off = hashval_getslot(query, key, len);
-	node = atomic_load_explicit(&parent->slots[off], memory_order_relaxed);
-
-	/* Ensure the parent load happens before the child load. */
-	atomic_thread_fence(memory_order_acquire);
+	/*
+	 * Consume operation pairs with release fence or release
+	 * operation in thmap_put.
+	 */
+	node = atomic_load_consume(&parent->slots[off]);
 
 	/* Descend the tree until we find a leaf or empty slot. */
 	if (node && THMAP_INODE_P(node)) {
@@ -490,8 +532,12 @@ descend:
 		query->level++;
 		goto descend;
 	}
-	if (atomic_load_explicit(&parent->state,
-	    memory_order_relaxed) & NODE_DELETED) {
+	/*
+	 * NODE_DELETED does not become stale until GC runs, which
+	 * can't happen while we're in the middle of an operation,
+	 * hence relaxed ordering.
+	 */
+	if (atomic_load_relaxed(&parent->state) & NODE_DELETED) {
 		return NULL;
 	}
 	*slot = off;
@@ -524,7 +570,9 @@ retry:
 		return NULL;
 	}
 	lock_node(node);
-	if (__predict_false(node->state & NODE_DELETED)) {
+	/* State is stable while locked, hence relaxed ordering.  */
+	if (__predict_false(atomic_load_relaxed(&node->state) &
+		NODE_DELETED)) {
 		/*
 		 * The node has been deleted.  The tree might have a new
 		 * shape now, therefore we must re-start from the root.
@@ -533,8 +581,8 @@ retry:
 		query->level = 0;
 		return NULL;
 	}
-	target = atomic_load_explicit(&node->slots[*slot],
-	    memory_order_relaxed);
+	/* Slots are stable while locked, hence relaxed ordering.  */
+	target = atomic_load_relaxed(&node->slots[*slot]);
 	if (__predict_false(target && THMAP_INODE_P(target))) {
 		/*
 		 * The target slot has been changed and it is now an
@@ -604,7 +652,13 @@ retry:
 		/* Success: the leaf was inserted; no locking involved. */
 		return val;
 	}
-	atomic_thread_fence(memory_order_release); // prepare leaf to be visible
+
+	/*
+	 * Release fence pairs, via store in node_insert calls at (*),
+	 * with consume operation in get_leaf or find_edge_node, to
+	 * ensure leaf is initialized by us before used by them.
+	 */
+	atomic_thread_fence(memory_order_release);
 
 	/*
 	 * Find the edge node and the target slot.
@@ -613,15 +667,15 @@ retry:
 	if (!parent) {
 		goto retry;
 	}
-	target = atomic_load_explicit(&parent->slots[slot],
-	    memory_order_relaxed); // tagged offset
+	/* Slots are stable while locked, hence relaxed ordering.  */
+	target = atomic_load_relaxed(&parent->slots[slot]); // tagged offset
 	if (THMAP_INODE_P(target)) {
 		/*
-		 * Empty slot: simply insert the new leaf.  The store
+		 * Empty slot: simply insert the new leaf.  The release
 		 * fence is already issued for us.
 		 */
 		target = THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT;
-		node_insert(parent, slot, target);
+		node_insert(parent, slot, target); /* (*) */
 		goto out;
 	}
 
@@ -653,7 +707,8 @@ descend:
 	query.level++;
 
 	/*
-	 * Insert the other (colliding) leaf first.
+	 * Insert the other (colliding) leaf first.  New child is not
+	 * yet published, so memory order is relaxed.
 	 */
 	other_slot = hashval_getleafslot(thmap, other, query.level);
 	target = THMAP_GETOFF(thmap, other) | THMAP_LEAF_BIT;
@@ -665,10 +720,11 @@ descend:
 	 *
 	 * Ensure that stores to the child (and leaf) reach the
 	 * global visibility before it gets inserted to the parent.
+	 *
+	 * Release operation pairs with consume operation in get_leaf,
+	 * find_edge_node.
 	 */
-	atomic_thread_fence(memory_order_release);
-	atomic_store_explicit(&parent->slots[slot],
-	    THMAP_GETOFF(thmap, child), memory_order_relaxed);
+	atomic_store_release(&parent->slots[slot], THMAP_GETOFF(thmap, child));
 
 	unlock_node(parent);
 	ASSERT(node_locked_p(child));
@@ -684,9 +740,12 @@ descend:
 		goto descend;
 	}
 
-	/* Insert our new leaf once we expanded enough. */
+	/*
+	 * Insert our new leaf once we expanded enough.  The release
+	 * fence is already issued for us.
+	 */
 	target = THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT;
-	node_insert(parent, slot, target);
+	node_insert(parent, slot, target); /* (*) */
 out:
 	unlock_node(parent);
 	return val;
@@ -717,18 +776,22 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		return NULL;
 	}
 
-	/* Remove the leaf. */
-	ASSERT(THMAP_NODE(thmap, atomic_load_explicit(&parent->slots[slot],
-	    memory_order_relaxed)) == leaf);
+	/*
+	 * Remove the leaf.  Slots are stable while locked, hence
+	 * relaxed ordering.
+	 */
+	ASSERT(THMAP_NODE(thmap, atomic_load_relaxed(&parent->slots[slot]))
+	    == leaf);
 	node_remove(parent, slot);
 
 	/*
 	 * Collapse the levels if removing the last item.
 	 */
-	while (query.level && NODE_COUNT(parent->state) == 0) {
+	while (query.level &&
+	    NODE_COUNT(atomic_load_relaxed(&parent->state)) == 0) {
 		thmap_inode_t *node = parent;
 
-		ASSERT(node->state == NODE_LOCKED);
+		ASSERT(atomic_load_relaxed(&node->state) == NODE_LOCKED);
 
 		/*
 		 * Ascend one level up.
@@ -741,14 +804,27 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		ASSERT(parent != NULL);
 
 		lock_node(parent);
-		ASSERT((parent->state & NODE_DELETED) == 0);
+		/*
+		 * State is stable while locked, hence relaxed
+		 * ordering.  Each node can be deleted only once.
+		 */
+		ASSERT((atomic_load_relaxed(&parent->state) & NODE_DELETED)
+		    == 0);
 
-		node->state |= NODE_DELETED;
+		/*
+		 * Lock is exclusive, so nobody else can be writing at
+		 * the same time, and no need for atomic R/M/W, but
+		 * readers may read without the lock and so need atomic
+		 * load/store.  No ordering here needed because the
+		 * entry itself stays valid until GC.
+		 */
+		atomic_store_relaxed(&node->state,
+		    atomic_load_relaxed(&node->state) | NODE_DELETED);
 		unlock_node(node); // memory_order_release
 
+		/* Slots are stable while locked, hence relaxed ordering.  */
 		ASSERT(THMAP_NODE(thmap,
-		    atomic_load_explicit(&parent->slots[slot],
-		    memory_order_relaxed)) == node);
+		    atomic_load_relaxed(&parent->slots[slot])) == node);
 		node_remove(parent, slot);
 
 		/* Stage the removed node for G/C. */
@@ -762,20 +838,19 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	 * Note: acquiring the lock on the top node effectively prevents
 	 * the root slot from changing.
 	 */
-	if (NODE_COUNT(parent->state) == 0) {
+	if (NODE_COUNT(atomic_load_relaxed(&parent->state)) == 0) {
 		const unsigned rslot = query.rslot;
-		const thmap_ptr_t nptr = atomic_load_explicit(
-		    &thmap->root[rslot], memory_order_relaxed);
+		const thmap_ptr_t nptr =
+		    atomic_load_relaxed(&thmap->root[rslot]);
 
 		ASSERT(query.level == 0);
 		ASSERT(parent->parent == THMAP_NULL);
 		ASSERT(THMAP_GETOFF(thmap, parent) == nptr);
 
 		/* Mark as deleted and remove from the root-level slot. */
-		parent->state |= NODE_DELETED;
-		atomic_thread_fence(memory_order_release);
-		atomic_store_explicit(&thmap->root[rslot],
-		    THMAP_NULL, memory_order_relaxed);
+		atomic_store_relaxed(&parent->state,
+		    atomic_load_relaxed(&parent->state) | NODE_DELETED);
+		atomic_store_relaxed(&thmap->root[rslot], THMAP_NULL);
 
 		stage_mem_gc(thmap, nptr, THMAP_INODE_LEN);
 	}
@@ -805,11 +880,17 @@ stage_mem_gc(thmap_t *thmap, uintptr_t addr, size_t len)
 	gc->addr = addr;
 	gc->len = len;
 retry:
-	head = atomic_load_explicit(&thmap->gc_list, memory_order_relaxed);
-	atomic_thread_fence(memory_order_acquire);
-	gc->next = head;
+	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	head = atomic_load_relaxed(&thmap->gc_list);
 
-	if (!atomic_compare_exchange_weak(&thmap->gc_list, head, gc)) {
+	gc->next = head;	/* not yet published */
+
+	/*
+	 * Release operation pairs with acquire operation in
+	 * thmap_stage_gc.
+	 */
+	if (!atomic_compare_exchange_weak_explicit(&thmap->gc_list, head, gc,
+		memory_order_release, memory_order_relaxed)) {
 		goto retry;
 	}
 }
@@ -817,7 +898,12 @@ retry:
 void *
 thmap_stage_gc(thmap_t *thmap)
 {
-	return atomic_exchange(&thmap->gc_list, NULL);
+	/*
+	 * Acquire operation pairs with release operation in
+	 * stage_mem_gc.
+	 */
+	return atomic_exchange_explicit(&thmap->gc_list, NULL,
+	    memory_order_acquire);
 }
 
 void
@@ -865,7 +951,7 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 			return NULL;
 		}
 		memset(thmap->root, 0, THMAP_ROOT_LEN);
-		atomic_thread_fence(memory_order_release);
+		atomic_thread_fence(memory_order_release); /* XXX */
 	}
 	return thmap;
 }
@@ -877,7 +963,7 @@ thmap_setroot(thmap_t *thmap, uintptr_t root_off)
 		return -1;
 	}
 	thmap->root = THMAP_GETPTR(thmap, root_off);
-	atomic_thread_fence(memory_order_release);
+	atomic_thread_fence(memory_order_release); /* XXX */
 	return 0;
 }
 
