@@ -207,7 +207,7 @@ static const thmap_ops_t thmap_default_ops = {
 
 #ifdef DEBUG
 static inline bool
-node_locked_p(const thmap_inode_t *node)
+node_locked_p(thmap_inode_t *node)
 {
 	return (atomic_load_relaxed(&node->state) & NODE_LOCKED) != 0;
 }
