@@ -104,6 +104,18 @@ again:
 #endif
 
 /*
+ * Conciser convenience wrappers.
+ */
+
+#define	atomic_load_relaxed(p)	atomic_load_explicit(p, memory_order_relaxed)
+#define	atomic_load_acquire(p)	atomic_load_explicit(p, memory_order_acquire)
+#define	atomic_load_consume(p)	atomic_load_explicit(p, memory_order_consume)
+#define	atomic_store_release(p,v) \
+	atomic_store_explicit(p, v, memory_order_release)
+#define	atomic_store_relaxed(p,v) \
+	atomic_store_explicit(p, v, memory_order_relaxed)
+
+/*
  * Exponential back-off for the spinning paths.
  */
 #define	SPINLOCK_BACKOFF_MIN	4
