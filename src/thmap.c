@@ -106,6 +106,7 @@
  * least significant bit.
  */
 typedef uintptr_t thmap_ptr_t;
+typedef atomic_uintptr_t atomic_thmap_ptr_t;
 
 #define	THMAP_NULL		((thmap_ptr_t)0)
 
@@ -134,9 +135,9 @@ typedef uintptr_t thmap_ptr_t;
  */
 
 typedef struct {
-	uint32_t _Atomic	state;
+	atomic_uint_least32_t	state;
 	thmap_ptr_t		parent;
-	thmap_ptr_t _Atomic	slots[LEVEL_SIZE];
+	atomic_thmap_ptr_t	slots[LEVEL_SIZE];
 } thmap_inode_t;
 
 #define	THMAP_INODE_LEN	sizeof(thmap_inode_t)
@@ -164,7 +165,7 @@ typedef struct {
 
 struct thmap {
 	uintptr_t		baseptr;
-	_Atomic thmap_ptr_t *	root;
+	atomic_thmap_ptr_t *	root;
 	unsigned		flags;
 	const thmap_ops_t *	ops;
 	thmap_gc_t *_Atomic	gc_list;
