@@ -211,7 +211,7 @@ lock_node(thmap_inode_t *node)
 	unsigned bcount = SPINLOCK_BACKOFF_MIN;
 	uint32_t s;
 again:
-	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	/* Will be followed immediately by CAS, hence relaxed ordering. */
 	s = atomic_load_relaxed(&node->state);
 	if (s & NODE_LOCKED) {
 		SPINLOCK_BACKOFF(bcount);
@@ -231,11 +231,11 @@ again:
 static void
 unlock_node(thmap_inode_t *node)
 {
-	/* State is stable while locked, hence relaxed ordering.  */
+	/* State is stable while locked, hence relaxed ordering. */
 	uint32_t s = atomic_load_relaxed(&node->state) & ~NODE_LOCKED;
 
 	ASSERT(node_locked_p(node));
-	/* Release operation pairs with acquire operation in lock_node.  */
+	/* Release operation pairs with acquire operation in lock_node. */
 	atomic_store_release(&node->state, s);
 }
 
@@ -322,7 +322,7 @@ node_create(thmap_t *thmap, thmap_inode_t *parent)
 
 	memset(node, 0, THMAP_INODE_LEN);
 	if (parent) {
-		/* Not yet published, no need for ordering.  */
+		/* Not yet published, no need for ordering. */
 		atomic_store_relaxed(&node->state, NODE_LOCKED);
 		node->parent = THMAP_GETOFF(thmap, parent);
 	}
@@ -366,7 +366,7 @@ node_remove(thmap_inode_t *node, unsigned slot)
 	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) > 0);
 	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) <= LEVEL_SIZE);
 
-	/* Element will be GC'd later; no need for ordering here.  */
+	/* Element will be GC'd later; no need for ordering here. */
 	atomic_store_relaxed(&node->slots[slot], THMAP_NULL);
 	atomic_store_relaxed(&node->state,
 	    atomic_load_relaxed(&node->state) - 1);
@@ -472,7 +472,7 @@ root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 	node_insert(node, slot, THMAP_GETOFF(thmap, leaf) | THMAP_LEAF_BIT);
 	nptr = THMAP_GETOFF(thmap, node);
 again:
-	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	/* Will be followed immediately by CAS, hence relaxed ordering. */
 	if (atomic_load_relaxed(&thmap->root[i])) {
 		thmap->ops->free(nptr, THMAP_INODE_LEN);
 		return false;
@@ -506,7 +506,7 @@ find_edge_node(const thmap_t *thmap, thmap_query_t *query,
 
 	ASSERT(query->level == 0);
 
-	/* Consume operation pairs with release operation in root_try_put.  */
+	/* Consume operation pairs with release operation in root_try_put. */
 	root_slot = atomic_load_consume(&thmap->root[query->rslot]);
 	parent = THMAP_NODE(thmap, root_slot);
 	if (!parent) {
@@ -564,7 +564,7 @@ retry:
 		return NULL;
 	}
 	lock_node(node);
-	/* State is stable while locked, hence relaxed ordering.  */
+	/* State is stable while locked, hence relaxed ordering. */
 	if (__predict_false(atomic_load_relaxed(&node->state) &
 		NODE_DELETED)) {
 		/*
@@ -575,7 +575,7 @@ retry:
 		query->level = 0;
 		return NULL;
 	}
-	/* Slots are stable while locked, hence relaxed ordering.  */
+	/* Slots are stable while locked, hence relaxed ordering. */
 	target = atomic_load_relaxed(&node->slots[*slot]);
 	if (__predict_false(target && THMAP_INODE_P(target))) {
 		/*
@@ -661,7 +661,7 @@ retry:
 	if (!parent) {
 		goto retry;
 	}
-	/* Slots are stable while locked, hence relaxed ordering.  */
+	/* Slots are stable while locked, hence relaxed ordering. */
 	target = atomic_load_relaxed(&parent->slots[slot]); // tagged offset
 	if (THMAP_INODE_P(target)) {
 		/*
@@ -816,7 +816,7 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		    atomic_load_relaxed(&node->state) | NODE_DELETED);
 		unlock_node(node); // memory_order_release
 
-		/* Slots are stable while locked, hence relaxed ordering.  */
+		/* Slots are stable while locked, hence relaxed ordering. */
 		ASSERT(THMAP_NODE(thmap,
 		    atomic_load_relaxed(&parent->slots[slot])) == node);
 		node_remove(parent, slot);
@@ -874,7 +874,7 @@ stage_mem_gc(thmap_t *thmap, uintptr_t addr, size_t len)
 	gc->addr = addr;
 	gc->len = len;
 retry:
-	/* Will be followed immediately by CAS, hence relaxed ordering.  */
+	/* Will be followed immediately by CAS, hence relaxed ordering. */
 	head = atomic_load_relaxed(&thmap->gc_list);
 
 	gc->next = head;	/* not yet published */
