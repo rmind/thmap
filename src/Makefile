@@ -4,6 +4,9 @@
 
 PROJ=		thmap
 
+SYSNAME:=	$(shell uname -s)
+SYSARCH:=	$(shell uname -m)
+
 CFLAGS+=	-std=c11 -O2 -g -Wall -Wextra -Werror
 CFLAGS+=	-D_POSIX_C_SOURCE=200809L
 CFLAGS+=	-D_GNU_SOURCE -D_DEFAULT_SOURCE
@@ -18,10 +21,8 @@ CFLAGS+=	-Wmissing-declarations -Wredundant-decls -Wnested-externs
 CFLAGS+=	-Wshadow -Wcast-qual -Wcast-align -Wwrite-strings
 CFLAGS+=	-Wold-style-definition
 CFLAGS+=	-Wsuggest-attribute=noreturn -Wjump-misses-init
-
-# New GCC 6/7 flags:
-#CFLAGS+=	-Wduplicated-cond -Wmisleading-indentation -Wnull-dereference
-#CFLAGS+=	-Wduplicated-branches -Wrestrict
+CFLAGS+=	-Wduplicated-cond -Wmisleading-indentation -Wnull-dereference
+CFLAGS+=	-Wduplicated-branches -Wrestrict
 
 ifeq ($(MAKECMDGOALS),tests)
 DEBUG=		1
@@ -29,8 +30,10 @@ endif
 
 ifeq ($(DEBUG),1)
 CFLAGS+=	-Og -DDEBUG -fno-omit-frame-pointer
+ifeq ($(SYSARCH),x86_64)
 CFLAGS+=	-fsanitize=address
 LDFLAGS+=	-fsanitize=address
+endif
 else
 CFLAGS+=	-DNDEBUG
 endif
