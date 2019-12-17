@@ -341,7 +341,7 @@ node_insert(thmap_inode_t *node, unsigned slot, thmap_ptr_t child)
 	 */
 	atomic_store_relaxed(&node->slots[slot], child);
 	atomic_store_relaxed(&node->state,
-	    1 + atomic_load_relaxed(&node->state));
+	    atomic_load_relaxed(&node->state) + 1);
 }
 
 static void
