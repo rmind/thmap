@@ -17,7 +17,7 @@
 #define	NUM2PTR(x)	((void *)(uintptr_t)(x))
 
 static unsigned		space_allocated = 0;
-static unsigned char	space[40000];
+static unsigned char	space[42500];
 
 static void
 test_basic(void)
@@ -240,7 +240,7 @@ static uintptr_t
 alloc_test_wrapper(size_t len)
 {
 	uintptr_t p = space_allocated;
-	space_allocated += roundup2(len, sizeof(int));
+	space_allocated += roundup2(len, sizeof(void *));
 	assert(space_allocated <= sizeof(space));
 	return p;
 }
@@ -251,7 +251,7 @@ free_test_wrapper(uintptr_t addr, size_t len)
 	assert(addr < sizeof(space));
 	assert(len < sizeof(space));
 
-	space_allocated -= roundup2(len, sizeof(int));
+	space_allocated -= roundup2(len, sizeof(void *));
 	assert(space_allocated < sizeof(space));
 }
 

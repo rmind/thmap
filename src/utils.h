@@ -8,6 +8,7 @@
 #ifndef	_UTILS_H_
 #define	_UTILS_H_
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -57,14 +58,18 @@
 /*
  * Atomic operations and memory barriers.  If C11 API is not available,
  * then wrap the GCC builtin routines.
+ *
+ * Note: This atomic_compare_exchange_weak does not do the C11 thing of
+ * filling *(expected) with the actual value, because we don't need
+ * that here.
  */
 #ifndef atomic_compare_exchange_weak
 #define	atomic_compare_exchange_weak(ptr, expected, desired) \
-    __sync_bool_compare_and_swap(ptr, expected, desired)
+    __sync_bool_compare_and_swap(ptr, *(expected), desired)
 #endif
 #ifndef atomic_compare_exchange_weak_explicit
 #define	atomic_compare_exchange_weak_explicit(ptr, expected, desired, s, f) \
-    __sync_bool_compare_and_swap(ptr, expected, desired)
+    atomic_compare_exchange_weak(ptr, expected, desired)
 #endif
 
 #ifndef atomic_exchange
@@ -80,11 +85,13 @@ again:
 	}
 	return oldval;
 }
+#define atomic_exchange_explicit(ptr, newval, o) atomic_exchange(ptr, newval)
 #endif
 
 #ifndef atomic_thread_fence
 #define	memory_order_relaxed	__ATOMIC_RELAXED
 #define	memory_order_acquire	__ATOMIC_ACQUIRE
+#define	memory_order_consume	__ATOMIC_CONSUME
 #define	memory_order_release	__ATOMIC_RELEASE
 #define	memory_order_seq_cst	__ATOMIC_SEQ_CST
 #define	atomic_thread_fence(m)	__atomic_thread_fence(m)
@@ -95,6 +102,18 @@ again:
 #ifndef atomic_load_explicit
 #define	atomic_load_explicit	__atomic_load_n
 #endif
+
+/*
+ * Conciser convenience wrappers.
+ */
+
+#define	atomic_load_relaxed(p)	atomic_load_explicit(p, memory_order_relaxed)
+#define	atomic_load_acquire(p)	atomic_load_explicit(p, memory_order_acquire)
+#define	atomic_load_consume(p)	atomic_load_explicit(p, memory_order_consume)
+#define	atomic_store_release(p,v) \
+	atomic_store_explicit(p, v, memory_order_release)
+#define	atomic_store_relaxed(p,v) \
+	atomic_store_explicit(p, v, memory_order_relaxed)
 
 /*
  * Exponential back-off for the spinning paths.
