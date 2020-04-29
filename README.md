@@ -1,6 +1,6 @@
 # Concurrent trie-hash map
 
-[![Build Status](https://travis-ci.org/rmind/thmap.svg?branch=master)](https://travis-ci.org/rmind/thmap)
+[![Build Status](https://travis-ci.com/rmind/thmap.svg?branch=master)](https://travis-ci.com/rmind/thmap)
 
 Concurrent trie-hash map library -- a general purpose associative array,
 combining the elements of hashing and radix trie.  Highlights:

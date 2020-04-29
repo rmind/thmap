@@ -30,7 +30,7 @@
  *   re-try from the root; this is a case for deletions and is achieved
  *   using the NODE_DELETED flag.
  *
- *   iii) the node destruction must be synchronised with the readers,
+ *   iii) the node destruction must be synchronized with the readers,
  *   e.g. by using the Epoch-based reclamation or other techniques.
  *
  * - WRITERS AND LOCKING: Each intermediate node has a spin-lock (which
@@ -217,7 +217,7 @@ again:
 		SPINLOCK_BACKOFF(bcount);
 		goto again;
 	}
-	/* Acquire from prior release in unlock_node. */
+	/* Acquire from prior release in unlock_node.() */
 	if (!atomic_compare_exchange_weak_explicit(&node->state,
 	    &s, s | NODE_LOCKED, memory_order_acquire, memory_order_relaxed)) {
 		bcount = SPINLOCK_BACKOFF_MIN;
@@ -231,7 +231,7 @@ unlock_node(thmap_inode_t *node)
 	uint32_t s = atomic_load_relaxed(&node->state) & ~NODE_LOCKED;
 
 	ASSERT(node_locked_p(node));
-	/* Release to subsequent acquire in lock_node. */
+	/* Release to subsequent acquire in lock_node(). */
 	atomic_store_release(&node->state, s);
 }
 
@@ -354,7 +354,7 @@ node_remove(thmap_inode_t *node, unsigned slot)
 	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) > 0);
 	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) <= LEVEL_SIZE);
 
-	/* Element will be GC'd later; no need for ordering here. */
+	/* Element will be GC-ed later; no need for ordering here. */
 	atomic_store_relaxed(&node->slots[slot], THMAP_NULL);
 	atomic_store_relaxed(&node->state,
 	    atomic_load_relaxed(&node->state) - 1);
@@ -411,7 +411,7 @@ get_leaf(const thmap_t *thmap, thmap_inode_t *parent, unsigned slot)
 {
 	thmap_ptr_t node;
 
-	/* Consume from prior release in thmap_put. */
+	/* Consume from prior release in thmap_put(). */
 	node = atomic_load_consume(&parent->slots[slot]);
 	if (THMAP_INODE_P(node)) {
 		return NULL;
@@ -439,7 +439,7 @@ root_try_put(thmap_t *thmap, const thmap_query_t *query, thmap_leaf_t *leaf)
 	unsigned slot;
 
 	/*
-	 * Must pre-check first.  No ordering required because we'll
+	 * Must pre-check first.  No ordering required because we will
 	 * check again before taking any actions, and start over if
 	 * this changes from null.
 	 */
@@ -461,10 +461,10 @@ again:
 		thmap->ops->free(nptr, THMAP_INODE_LEN);
 		return false;
 	}
-	/* Release to subsequent consume in find_edge_node. */
+	/* Release to subsequent consume in find_edge_node(). */
 	expected = THMAP_NULL;
 	if (!atomic_compare_exchange_weak_explicit(&thmap->root[i], &expected,
-		nptr, memory_order_release, memory_order_relaxed)) {
+	    nptr, memory_order_release, memory_order_relaxed)) {
 		goto again;
 	}
 	return true;
@@ -487,7 +487,7 @@ find_edge_node(const thmap_t *thmap, thmap_query_t *query,
 
 	ASSERT(query->level == 0);
 
-	/* Consume from prior release in root_try_put. */
+	/* Consume from prior release in root_try_put(). */
 	root_slot = atomic_load_consume(&thmap->root[query->rslot]);
 	parent = THMAP_NODE(thmap, root_slot);
 	if (!parent) {
@@ -495,7 +495,7 @@ find_edge_node(const thmap_t *thmap, thmap_query_t *query,
 	}
 descend:
 	off = hashval_getslot(query, key, len);
-	/* Consume from prior release in thmap_put. */
+	/* Consume from prior release in thmap_put(). */
 	node = atomic_load_consume(&parent->slots[off]);
 
 	/* Descend the tree until we find a leaf or empty slot. */
@@ -506,7 +506,7 @@ descend:
 	}
 	/*
 	 * NODE_DELETED does not become stale until GC runs, which
-	 * can't happen while we're in the middle of an operation,
+	 * cannot happen while we are in the middle of an operation,
 	 * hence relaxed ordering.
 	 */
 	if (atomic_load_relaxed(&parent->state) & NODE_DELETED) {
@@ -542,8 +542,7 @@ retry:
 		return NULL;
 	}
 	lock_node(node);
-	if (__predict_false(atomic_load_relaxed(&node->state) &
-		NODE_DELETED)) {
+	if (__predict_false(atomic_load_relaxed(&node->state) & NODE_DELETED)) {
 		/*
 		 * The node has been deleted.  The tree might have a new
 		 * shape now, therefore we must re-start from the root.
@@ -607,7 +606,7 @@ thmap_put(thmap_t *thmap, const void *key, size_t len, void *val)
 	thmap_ptr_t target;
 
 	/*
-	 * First, pre-allocate and initialise the leaf node.
+	 * First, pre-allocate and initialize the leaf node.
 	 */
 	leaf = leaf_create(thmap, key, len, val);
 	if (__predict_false(!leaf)) {
@@ -625,7 +624,7 @@ retry:
 
 	/*
 	 * Release node via store in node_insert (*) to subsequent
-	 * consume in get_leaf or find_edge_node.
+	 * consume in get_leaf() or find_edge_node().
 	 */
 	atomic_thread_fence(memory_order_release);
 
@@ -675,8 +674,8 @@ descend:
 	query.level++;
 
 	/*
-	 * Insert the other (colliding) leaf first.  New child is not
-	 * yet published, so memory order is relaxed.
+	 * Insert the other (colliding) leaf first.  The new child is
+	 * not yet published, so memory order is relaxed.
 	 */
 	other_slot = hashval_getleafslot(thmap, other, query.level);
 	target = THMAP_GETOFF(thmap, other) | THMAP_LEAF_BIT;
@@ -688,7 +687,7 @@ descend:
 	 *
 	 * Ensure that stores to the child (and leaf) reach global
 	 * visibility before it gets inserted to the parent, as
-	 * consumed by get_leaf or find_edge_node.
+	 * consumed by get_leaf() or find_edge_node().
 	 */
 	atomic_store_release(&parent->slots[slot], THMAP_GETOFF(thmap, child));
 
@@ -839,10 +838,11 @@ stage_mem_gc(thmap_t *thmap, uintptr_t addr, size_t len)
 	gc->len = len;
 retry:
 	head = atomic_load_relaxed(&thmap->gc_list);
-	gc->next = head;	/* not yet published */
-	/* Release to subsequent acquire in thmap_stage_gc. */
+	gc->next = head; // not yet published
+
+	/* Release to subsequent acquire in thmap_stage_gc(). */
 	if (!atomic_compare_exchange_weak_explicit(&thmap->gc_list, &head, gc,
-		memory_order_release, memory_order_relaxed)) {
+	    memory_order_release, memory_order_relaxed)) {
 		goto retry;
 	}
 }
@@ -850,7 +850,7 @@ retry:
 void *
 thmap_stage_gc(thmap_t *thmap)
 {
-	/* Acquire from prior release in stage_mem_gc. */
+	/* Acquire from prior release in stage_mem_gc(). */
 	return atomic_exchange_explicit(&thmap->gc_list, NULL,
 	    memory_order_acquire);
 }
