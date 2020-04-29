@@ -3,13 +3,21 @@
 #
 
 PROJ=		thmap
+LIB=		lib$(PROJ)
+INCS=		thmap.h
+MANS=		thmap.3
 
 SYSNAME:=	$(shell uname -s)
 SYSARCH:=	$(shell uname -m)
 
+ifeq ($(MAKECMDGOALS),tests)
+DEBUG=		1
+endif
+
+#
+# Common C compiler flags.
+#
 CFLAGS+=	-std=c11 -O2 -g -Wall -Wextra -Werror
-CFLAGS+=	-D_POSIX_C_SOURCE=200809L
-CFLAGS+=	-D_GNU_SOURCE -D_DEFAULT_SOURCE
 
 #
 # Extended warning flags.
@@ -24,23 +32,31 @@ CFLAGS+=	-Wsuggest-attribute=noreturn -Wjump-misses-init
 CFLAGS+=	-Wduplicated-cond -Wmisleading-indentation -Wnull-dereference
 CFLAGS+=	-Wduplicated-branches -Wrestrict
 
-ifeq ($(MAKECMDGOALS),tests)
-DEBUG=		1
+#
+# System-specific or compiler-specific flags.
+#
+
+ifeq ($(SYSNAME),Linux)
+CFLAGS+=	-D_POSIX_C_SOURCE=200809L
+CFLAGS+=	-D_GNU_SOURCE -D_DEFAULT_SOURCE
 endif
 
+#
+# Standard vs debug build flags.
+#
 ifeq ($(DEBUG),1)
 CFLAGS+=	-Og -DDEBUG -fno-omit-frame-pointer
 ifeq ($(SYSARCH),x86_64)
-CFLAGS+=	-fsanitize=address
-LDFLAGS+=	-fsanitize=address
+CFLAGS+=	-fsanitize=address -fsanitize=undefined
+LDFLAGS+=	-fsanitize=address -fsanitize=undefined
 endif
 else
 CFLAGS+=	-DNDEBUG
 endif
 
-LIB=		lib$(PROJ)
-INCS=		thmap.h
-MANS=		thmap.3
+#
+# Source and targets.
+#
 
 OBJS=		thmap.o
 OBJS+=		murmurhash.o

@@ -50,12 +50,6 @@
 #endif
 
 /*
- * Counting the number of bits.
- */
-
-#define	popcount32(x)		__builtin_popcount(x)
-
-/*
  * Atomic operations and memory barriers.  If C11 API is not available,
  * then wrap the GCC builtin routines.
  *
@@ -110,10 +104,11 @@ again:
 #define	atomic_load_relaxed(p)	atomic_load_explicit(p, memory_order_relaxed)
 #define	atomic_load_acquire(p)	atomic_load_explicit(p, memory_order_acquire)
 #define	atomic_load_consume(p)	atomic_load_explicit(p, memory_order_consume)
+
 #define	atomic_store_release(p,v) \
-	atomic_store_explicit(p, v, memory_order_release)
+    atomic_store_explicit(p, v, memory_order_release)
 #define	atomic_store_relaxed(p,v) \
-	atomic_store_explicit(p, v, memory_order_relaxed)
+    atomic_store_explicit(p, v, memory_order_relaxed)
 
 /*
  * Exponential back-off for the spinning paths.
