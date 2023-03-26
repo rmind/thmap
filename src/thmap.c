@@ -45,6 +45,10 @@
  *   As the levels are collapsed, NODE_DELETED gets propagated up-tree.
  *   The leaf nodes just stay as-is until they are reclaimed.
  *
+ *   Edge case: we allow empty intermediate nodes in case of the memory
+ *   allocation failure; this is expected to be a very rare condition and
+ *   the node could be cleaned up at a later point.
+ *
  * - ROOT LEVEL: The root level is a special case, as it is implemented
  *   as an array (rather than intermediate node).  The root-level slot can
  *   only be set using CAS and it can only be set to a valid intermediate
@@ -171,7 +175,8 @@ struct thmap {
 	thmap_gc_t *_Atomic	gc_list;
 };
 
-static void	stage_mem_gc(thmap_t *, uintptr_t, size_t);
+static thmap_gc_t *	prep_mem_gc(uintptr_t, size_t);
+static void		stage_mem_gc(thmap_t *, thmap_gc_t *);
 
 /*
  * A few low-level helper routines.
@@ -505,7 +510,7 @@ descend:
 		goto descend;
 	}
 	/*
-	 * NODE_DELETED does not become stale until GC runs, which
+	 * NODE_DELETED does not become stale until G/C runs, which
 	 * cannot happen while we are in the middle of an operation,
 	 * hence relaxed ordering.
 	 */
@@ -716,6 +721,32 @@ out:
 	return val;
 }
 
+static inline bool
+prepare_leaf_gc(const thmap_t *thmap, const thmap_leaf_t *leaf,
+    thmap_gc_t **leaf_gc_p, thmap_gc_t **key_gc_p)
+{
+	thmap_gc_t *leaf_gc, *key_gc;
+
+	if ((thmap->flags & THMAP_NOCOPY) == 0) {
+		key_gc = prep_mem_gc(leaf->key, leaf->len);
+		if (__predict_false(key_gc == NULL)) {
+			return false;
+		}
+	} else {
+		key_gc = NULL;
+	}
+
+	leaf_gc = prep_mem_gc(THMAP_GETOFF(thmap, leaf), sizeof(thmap_leaf_t));
+	if (__predict_false(leaf_gc == NULL)) {
+		free(key_gc);
+		return false;
+	}
+
+	*leaf_gc_p = leaf_gc;
+	*key_gc_p = key_gc;
+	return true;
+}
+
 /*
  * thmap_del: remove the entry given the key.
  */
@@ -725,6 +756,8 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	thmap_query_t query;
 	thmap_leaf_t *leaf;
 	thmap_inode_t *parent;
+	thmap_gc_t *leaf_gc;
+	thmap_gc_t *key_gc;
 	unsigned slot;
 	void *val;
 
@@ -741,10 +774,19 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		return NULL;
 	}
 
-	/* Remove the leaf. */
+	/*
+	 * Prepare the leaf G/C structures.
+	 */
+	if (!prepare_leaf_gc(thmap, leaf, &leaf_gc, &key_gc)) {
+		unlock_node(parent);
+		return NULL;
+	}
+
+	/* Remove the leaf and save its value. */
 	ASSERT(THMAP_NODE(thmap, atomic_load_relaxed(&parent->slots[slot]))
 	    == leaf);
 	node_remove(parent, slot);
+	val = leaf->val;
 
 	/*
 	 * Collapse the levels if removing the last item.
@@ -752,8 +794,14 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 	while (query.level &&
 	    NODE_COUNT(atomic_load_relaxed(&parent->state)) == 0) {
 		thmap_inode_t *node = parent;
+		thmap_gc_t *node_gc;
 
 		ASSERT(atomic_load_relaxed(&node->state) == NODE_LOCKED);
+		if ((node_gc = prep_mem_gc(THMAP_GETOFF(thmap, node),
+		    THMAP_INODE_LEN)) == NULL) {
+			/* Out of memory: just leave this level empty. */
+			goto out;
+		}
 
 		/*
 		 * Ascend one level up.
@@ -785,7 +833,7 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		node_remove(parent, slot);
 
 		/* Stage the removed node for G/C. */
-		stage_mem_gc(thmap, THMAP_GETOFF(thmap, node), THMAP_INODE_LEN);
+		stage_mem_gc(thmap, node_gc);
 	}
 
 	/*
@@ -799,28 +847,30 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
 		const unsigned rslot = query.rslot;
 		const thmap_ptr_t nptr =
 		    atomic_load_relaxed(&thmap->root[rslot]);
+		thmap_gc_t *node_gc;
 
 		ASSERT(query.level == 0);
 		ASSERT(parent->parent == THMAP_NULL);
 		ASSERT(THMAP_GETOFF(thmap, parent) == nptr);
+
+		if ((node_gc = prep_mem_gc(nptr, THMAP_INODE_LEN)) == NULL) {
+			/* Out of memory: just leave the empty node. */
+			goto out;
+		}
 
 		/* Mark as deleted and remove from the root-level slot. */
 		atomic_store_relaxed(&parent->state,
 		    atomic_load_relaxed(&parent->state) | NODE_DELETED);
 		atomic_store_relaxed(&thmap->root[rslot], THMAP_NULL);
 
-		stage_mem_gc(thmap, nptr, THMAP_INODE_LEN);
+		stage_mem_gc(thmap, node_gc);
 	}
+out:
 	unlock_node(parent);
 
-	/*
-	 * Save the value and stage the leaf for G/C.
-	 */
-	val = leaf->val;
-	if ((thmap->flags & THMAP_NOCOPY) == 0) {
-		stage_mem_gc(thmap, leaf->key, leaf->len);
-	}
-	stage_mem_gc(thmap, THMAP_GETOFF(thmap, leaf), sizeof(thmap_leaf_t));
+	/* Save the value and stage the leaf for G/C.  */
+	stage_mem_gc(thmap, key_gc);
+	stage_mem_gc(thmap, leaf_gc);
 	return val;
 }
 
@@ -828,14 +878,27 @@ thmap_del(thmap_t *thmap, const void *key, size_t len)
  * G/C routines.
  */
 
-static void
-stage_mem_gc(thmap_t *thmap, uintptr_t addr, size_t len)
+static thmap_gc_t *
+prep_mem_gc(uintptr_t addr, size_t len)
 {
-	thmap_gc_t *head, *gc;
+	thmap_gc_t *gc;
 
-	gc = malloc(sizeof(thmap_gc_t));
+	if ((gc = malloc(sizeof(thmap_gc_t))) == NULL) {
+		return NULL;
+	}
 	gc->addr = addr;
 	gc->len = len;
+	return gc;
+}
+
+static void
+stage_mem_gc(thmap_t *thmap, thmap_gc_t *gc)
+{
+	thmap_gc_t *head;
+
+	if (__predict_false(gc == NULL)) {
+		return;
+	}
 retry:
 	head = atomic_load_relaxed(&thmap->gc_list);
 	gc->next = head; // not yet published
