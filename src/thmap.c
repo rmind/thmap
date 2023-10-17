@@ -894,11 +894,11 @@ thmap_create(uintptr_t baseptr, const thmap_ops_t *ops, unsigned flags)
 	if ((thmap->flags & THMAP_SETROOT) == 0) {
 		/* Allocate the root level. */
 		root = thmap->ops->alloc(THMAP_ROOT_LEN);
-		thmap->root = THMAP_GETPTR(thmap, root);
-		if (!thmap->root) {
+		if (!root) {
 			free(thmap);
 			return NULL;
 		}
+		thmap->root = THMAP_GETPTR(thmap, root);
 		memset(thmap->root, 0, THMAP_ROOT_LEN);
 		atomic_thread_fence(memory_order_release); /* XXX */
 	}
