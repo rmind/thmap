@@ -17,6 +17,7 @@
 #define	NUM2PTR(x)	((void *)(uintptr_t)(x))
 
 static unsigned		space_allocated = 0;
+static const unsigned	space_off = 4;
 static unsigned char	space[42500] __aligned(4);
 
 static void
@@ -242,13 +243,13 @@ alloc_test_wrapper(size_t len)
 	uintptr_t p = space_allocated;
 	space_allocated += roundup2(len, sizeof(void *));
 	assert(space_allocated <= sizeof(space));
-	return p + 4;
+	return p + space_off;
 }
 
 static void
 free_test_wrapper(uintptr_t addr, size_t len)
 {
-	assert(addr - 4 < sizeof(space));
+	assert(addr - space_off < sizeof(space));
 	assert(len < sizeof(space));
 
 	space_allocated -= roundup2(len, sizeof(void *));
@@ -263,7 +264,7 @@ static const thmap_ops_t thmap_test_ops = {
 static void
 test_mem(void)
 {
-	uintptr_t baseptr = (uintptr_t)(void *)space - 4;
+	uintptr_t baseptr = (uintptr_t)(void *)space - space_off;
 	const unsigned nitems = 512;
 	thmap_t *hmap;
 	void *ret;

@@ -347,17 +347,18 @@ node_insert(thmap_inode_t *node, unsigned slot, thmap_ptr_t child)
 static void
 node_remove(thmap_inode_t *node, unsigned slot)
 {
+	const uint32_t state = atomic_load_relaxed(&node->state);
+
 	ASSERT(node_locked_p(node));
-	ASSERT((atomic_load_relaxed(&node->state) & NODE_DELETED) == 0);
+	ASSERT((state & NODE_DELETED) == 0);
 	ASSERT(atomic_load_relaxed(&node->slots[slot]) != THMAP_NULL);
 
-	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) > 0);
-	ASSERT(NODE_COUNT(atomic_load_relaxed(&node->state)) <= LEVEL_SIZE);
+	ASSERT(NODE_COUNT(state) > 0);
+	ASSERT(NODE_COUNT(state) <= LEVEL_SIZE);
 
 	/* Element will be GC-ed later; no need for ordering here. */
 	atomic_store_relaxed(&node->slots[slot], THMAP_NULL);
-	atomic_store_relaxed(&node->state,
-	    atomic_load_relaxed(&node->state) - 1);
+	atomic_store_relaxed(&node->state, state - 1);
 }
 
 /*

@@ -34,6 +34,14 @@
 #endif
 
 /*
+ * Various C helpers and attribute macros.
+ */
+
+#ifndef __aligned
+#define	__aligned(x)		__attribute__((__aligned__(x)))
+#endif
+
+/*
  * Minimum, maximum and rounding macros.
  */
 
